@@ -1,0 +1,18 @@
+{
+  "name": "kiria-online",
+  "version": "4.0.0",
+  "description": "Kiria Online 3D – Ein Tibia-inspiriertes 3D-MMORPG (Node.js + three.js)",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "tunnel": "npx --yes localtunnel --port 3000"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "three": "^0.185.1"
+  }
+}

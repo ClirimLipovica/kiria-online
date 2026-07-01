@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kiria Online 3D</title>
+<style>
+  :root {
+    --gold: #e8c165;
+    --panel: rgba(18, 14, 10, 0.88);
+    --border: #5a4326;
+    --red: #d9453a;
+    --blue: #3a7bd9;
+    --green: #4caf50;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0a0f; font-family: 'Segoe UI', Verdana, sans-serif; color: #e8e0d0; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .panel { background: var(--panel); border: 2px solid var(--border); border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+
+  /* ---------- Login ---------- */
+  #login {
+    position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 30%, #26202e 0%, #0a0a0f 75%);
+  }
+  #login .box { width: 560px; padding: 28px 34px; text-align: center; }
+  #login h1 { font-family: Georgia, serif; color: var(--gold); letter-spacing: 5px; margin: 0; font-size: 34px; text-shadow: 0 2px 12px rgba(232,193,101,.35); }
+  #login h2 { font-weight: normal; font-size: 13px; color: #a89878; margin: 4px 0 22px; letter-spacing: 2px; }
+  #login input {
+    width: 100%; padding: 11px 13px; margin-bottom: 12px; border-radius: 6px;
+    border: 2px solid var(--border); background: #171310; color: #eee; font-size: 14px; outline: none;
+  }
+  #login input:focus { border-color: var(--gold); }
+  .vocs { display: flex; gap: 10px; margin: 6px 0 16px; }
+  .voc { flex: 1; padding: 10px 6px; border: 2px solid var(--border); border-radius: 8px; cursor: pointer; background: #171310; transition: all .15s; }
+  .voc:hover { border-color: #8a6a3a; }
+  .voc.sel { border-color: var(--gold); background: #262014; box-shadow: 0 0 12px rgba(232,193,101,.25); }
+  .voc .ico { font-size: 24px; }
+  .voc .nm { font-weight: bold; color: var(--gold); font-size: 12px; margin: 4px 0 2px; }
+  .voc .ds { font-size: 9.5px; color: #a89878; line-height: 1.3; }
+  .skinRow { display: flex; gap: 8px; justify-content: center; margin: 2px 0 16px; }
+  .skin { width: 26px; height: 26px; border-radius: 50%; cursor: pointer; border: 2px solid #000; box-sizing: border-box; }
+  .skin.sel { border-color: #fff; transform: scale(1.2); }
+  .skinLbl { font-size: 11px; color: #a89878; margin-bottom: 6px; }
+  #playBtn {
+    width: 100%; padding: 13px; font-size: 16px; font-weight: bold; letter-spacing: 2px; cursor: pointer;
+    color: #1a1206; background: linear-gradient(180deg, #f0d080, #c89b45); border: 2px solid #f5dc9a; border-radius: 8px;
+  }
+  #playBtn:hover { filter: brightness(1.1); }
+  #playBtn:disabled { filter: grayscale(1); cursor: wait; }
+  #loginErr { color: #ff7a6e; font-size: 13px; min-height: 18px; margin: 10px 0 0; }
+  #login .hint { font-size: 11px; color: #776a55; margin-top: 14px; line-height: 1.5; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
+  #hud > * { pointer-events: auto; }
+
+  #statusBox { position: absolute; top: 12px; left: 12px; padding: 10px 14px; width: 250px; }
+  #statusBox .nm { color: var(--gold); font-weight: bold; font-size: 14px; margin-bottom: 6px; }
+  .bar { height: 15px; border-radius: 4px; background: #201a14; border: 1px solid #000; margin-bottom: 5px; position: relative; overflow: hidden; }
+  .bar .fill { height: 100%; transition: width .25s; border-radius: 3px; }
+  .bar .txt { position: absolute; inset: 0; text-align: center; font-size: 10px; line-height: 15px; color: #fff; text-shadow: 0 1px 2px #000; }
+  #hpFill { background: linear-gradient(180deg, #f06055, #b62c22); }
+  #mpFill { background: linear-gradient(180deg, #5a95ec, #2757a8); }
+  #xpFill { background: linear-gradient(180deg, #d8c26a, #96803a); }
+
+  #targetBox { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 18px; text-align: center; display: none; min-width: 220px; }
+  #targetBox .nm { color: #ff9a8a; font-weight: bold; font-size: 13px; margin-bottom: 5px; }
+
+  #miniWrap { position: absolute; top: 12px; right: 12px; padding: 8px; text-align: center; }
+  #minimap { border-radius: 6px; border: 1px solid #000; display: block; image-rendering: pixelated; }
+  #onlineCount { font-size: 11px; color: #a89878; margin-top: 5px; }
+
+  /* Hotbar */
+  #hotbar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 7px; padding: 8px; }
+  .slot { width: 58px; height: 58px; border: 2px solid var(--border); border-radius: 8px; background: #171310; cursor: pointer; position: relative; text-align: center; user-select: none; }
+  .slot:hover { border-color: var(--gold); }
+  .slot .key { position: absolute; top: 2px; left: 5px; font-size: 10px; color: var(--gold); font-weight: bold; }
+  .slot .ico { font-size: 22px; margin-top: 9px; }
+  .slot .lbl { font-size: 8.5px; color: #b8a888; position: absolute; bottom: 3px; left: 0; right: 0; white-space: nowrap; overflow: hidden; }
+  .slot .cd { position: absolute; inset: 0; background: rgba(0,0,0,.72); border-radius: 6px; color: #fff; font-size: 17px; line-height: 56px; display: none; }
+  .slot .cnt { position: absolute; top: 2px; right: 4px; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 0 1px 2px #000; }
+  .slot.locked { opacity: .38; }
+
+  /* Chat */
+  #chatBox { position: absolute; bottom: 14px; left: 12px; width: clamp(200px, calc(50vw - 225px), 330px); }
+  #chatLog { height: 120px; overflow-y: auto; padding: 8px 10px; font-size: 12px; line-height: 1.45; margin-bottom: 5px; scrollbar-width: thin; }
+  #chatLog .sys { color: #e8b75a; }
+  #chatLog .info { color: #8fd18a; }
+  #chatLog .nm { color: #7ec3e8; font-weight: bold; }
+  #chatInput { width: 100%; padding: 8px 10px; border-radius: 6px; border: 2px solid var(--border); background: rgba(23,19,16,.92); color: #eee; font-size: 13px; outline: none; }
+  #chatInput:focus { border-color: var(--gold); }
+
+  /* Inventar / Charakter */
+  #invBox { position: absolute; right: 12px; top: 210px; width: 265px; padding: 12px 14px; display: none; max-height: calc(100vh - 320px); overflow-y: auto; scrollbar-width: thin; }
+  #invBox h3 { margin: 0 0 8px; color: var(--gold); font-size: 14px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+  #invBox .row { display: flex; justify-content: space-between; font-size: 12px; padding: 2.5px 0; }
+  #invBox .row b { color: #d8c89a; font-weight: normal; }
+  .invItem { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding: 4px 6px; border-radius: 5px; background: #1d1712; margin: 3px 0; }
+  .invItem button { font-size: 10px; padding: 2px 8px; margin-left: 4px; cursor: pointer; background: #33281a; border: 1px solid var(--border); color: #e8c165; border-radius: 4px; }
+  .invItem button:hover { background: #4a3a24; }
+
+  /* Shop */
+  #shopBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 330px; padding: 16px 20px; display: none; z-index: 20; }
+  #shopBox h3 { margin: 0 0 4px; color: var(--gold); }
+  #shopBox .gold { font-size: 12px; color: #d8c26a; margin-bottom: 10px; }
+  #shopBox .x { position: absolute; top: 8px; right: 12px; cursor: pointer; color: #a89878; font-size: 18px; }
+
+  /* Tod */
+  #deathBox { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(40,0,0,.55); backdrop-filter: blur(2px); }
+  #deathBox .inner { text-align: center; padding: 34px 50px; }
+  #deathBox h2 { color: var(--red); font-family: Georgia, serif; font-size: 30px; margin: 0 0 8px; }
+  #deathBox p { color: #c8b8a0; font-size: 13px; }
+  #respawnBtn { padding: 11px 34px; font-size: 15px; font-weight: bold; cursor: pointer; color: #1a1206; background: linear-gradient(180deg,#f0d080,#c89b45); border: 2px solid #f5dc9a; border-radius: 8px; margin-top: 10px; }
+
+  #helpLine { position: absolute; bottom: 172px; left: 12px; font-size: 10.5px; color: rgba(200,185,150,.55); pointer-events: none; }
+
+  ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: #4a3a24; border-radius: 4px; } ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ============ LOGIN ============ -->
+<div id="login">
+  <div class="box panel">
+    <h1>KIRIA ONLINE</h1>
+    <h2>⚔ EIN 3D-FANTASY-ABENTEUER ⚔</h2>
+    <input id="nameInput" maxlength="16" placeholder="Charaktername" autocomplete="off">
+    <input id="pwInput" type="password" maxlength="40" placeholder="Passwort (neu = Charakter wird erstellt)">
+    <div class="vocs" id="vocRow">
+      <div class="voc sel" data-voc="knight"><div class="ico">🛡️</div><div class="nm">Ritter</div><div class="ds">Viel Leben, starker Nahkampf</div></div>
+      <div class="voc" data-voc="paladin"><div class="ico">🏹</div><div class="nm">Paladin</div><div class="ds">Wurfspeere auf Distanz</div></div>
+      <div class="voc" data-voc="sorcerer"><div class="ico">🔮</div><div class="nm">Magier</div><div class="ds">Magische Geschosse & Zauber</div></div>
+      <div class="voc" data-voc="tamer"><div class="ico">🐺</div><div class="nm">Bestienzüchter</div><div class="ds">Zähmt Tiere, die mitkämpfen</div></div>
+    </div>
+    <div class="skinLbl">Farbe deines Helden:</div>
+    <div class="skinRow" id="skinRow"></div>
+    <button id="playBtn">SPIELEN</button>
+    <div id="loginErr"></div>
+    <div class="hint">WASD/Pfeile: Laufen &nbsp;•&nbsp; Klick auf Monster: Angreifen &nbsp;•&nbsp; Klick auf NPC: Reden<br>1–5: Zauber &nbsp;•&nbsp; 6/7: Tränke &nbsp;•&nbsp; Q/E: Kamera drehen &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; Enter: Chat &nbsp;•&nbsp; Mausrad: Zoom</div>
+  </div>
+</div>
+
+<!-- ============ HUD ============ -->
+<div id="hud">
+  <div id="statusBox" class="panel">
+    <div class="nm" id="statName">–</div>
+    <div class="bar"><div class="fill" id="hpFill"></div><div class="txt" id="hpTxt"></div></div>
+    <div class="bar"><div class="fill" id="mpFill"></div><div class="txt" id="mpTxt"></div></div>
+    <div class="bar"><div class="fill" id="xpFill"></div><div class="txt" id="xpTxt"></div></div>
+    <div id="buffBar" style="font-size:11px;color:#e8c165;min-height:0"></div>
+    <div id="petBar" style="display:none">
+      <div style="font-size:11px;color:#8fd18a;margin-top:3px" id="petName"></div>
+      <div class="bar" style="height:10px"><div class="fill" id="petFill" style="background:linear-gradient(180deg,#7ec86a,#3e8a2e)"></div><div class="txt" id="petTxt" style="line-height:10px;font-size:8px"></div></div>
+    </div>
+  </div>
+
+  <div id="targetBox" class="panel">
+    <div class="nm" id="targetName"></div>
+    <div class="bar"><div class="fill" id="targetFill" style="background:linear-gradient(180deg,#f06055,#b62c22)"></div><div class="txt" id="targetTxt"></div></div>
+  </div>
+
+  <div id="miniWrap" class="panel">
+    <canvas id="minimap" width="168" height="168"></canvas>
+    <div id="onlineCount"></div>
+  </div>
+
+  <div id="hotbar" class="panel"></div>
+
+  <div id="chatBox">
+    <div id="chatLog" class="panel"></div>
+    <input id="chatInput" maxlength="200" placeholder="Enter drücken zum Chatten…">
+  </div>
+  <div id="helpLine">I: Inventar • Klick auf Monster: Angriff • ESC: Ziel abwählen</div>
+
+  <div id="invBox" class="panel"></div>
+
+  <div id="shopBox" class="panel">
+    <span class="x" id="shopClose">✕</span>
+    <h3 id="shopTitle">🏪 Laden</h3>
+    <div class="gold" id="shopGold"></div>
+    <div id="shopItems"></div>
+  </div>
+
+  <div id="dlgBox" class="panel" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:380px;padding:16px 20px;display:none;z-index:19">
+    <span class="x" id="dlgClose" style="position:absolute;top:8px;right:12px;cursor:pointer;color:#a89878;font-size:18px">✕</span>
+    <h3 id="dlgName" style="margin:0 0 8px;color:var(--gold)"></h3>
+    <div id="dlgText" style="font-size:13px;line-height:1.5;color:#d8cdb8;min-height:52px;font-style:italic"></div>
+    <div id="dlgTopics" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+  </div>
+</div>
+
+<div id="deathBox">
+  <div class="inner panel">
+    <h2>☠ Du bist gestorben</h2>
+    <p>Du erwachst im Tempel von Kiria.<br>25% deines Goldes sind verloren.</p>
+    <button id="respawnBtn">Wiederbeleben</button>
+  </div>
+</div>
+
+<script type="importmap">
+  { "imports": { "three": "/vendor/three.module.js" } }
+</script>
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

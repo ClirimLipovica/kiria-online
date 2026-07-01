@@ -1,0 +1,11 @@
+# Abhängigkeiten
+node_modules/
+
+# Spielstände (Konten mit Passwort-Hashes) – nicht ins Repo!
+server/data/
+
+# Lokale Editor-/Tool-Einstellungen
+.claude/settings.local.json
+
+# Sonstiges
+_sync_test.txt
