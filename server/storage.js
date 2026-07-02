@@ -19,37 +19,66 @@ const URL = clean(process.env.UPSTASH_REDIS_REST_URL);
 const TOKEN = clean(process.env.UPSTASH_REDIS_REST_TOKEN);
 const cloud = !!(URL && TOKEN);
 
+// Diagnose-Zustand (für /api/status – keine Geheimnisse!)
+const status = {
+  mode: cloud ? 'cloud' : 'datei',
+  urlHost: cloud ? URL.replace(/^https?:\/\//, '').slice(0, 12) + '…' : null,
+  loadOk: null, loadError: null,
+  lastSaveOk: null, lastSaveError: null, lastSaveAt: null,
+};
+
 async function load() {
-  if (cloud) {
-    const res = await fetch(`${URL}/get/${KEY}`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
-    });
-    if (!res.ok) throw new Error(`Cloud-Speicher: HTTP ${res.status}`);
-    const data = await res.json();
-    if (data.result) {
-      console.log('☁ Spielstände aus dem Cloud-Speicher geladen.');
-      return JSON.parse(data.result);
-    }
-    console.log('☁ Cloud-Speicher verbunden (noch leer).');
-    return {};
-  }
   try {
-    return JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
-  } catch { return {}; }
+    let result;
+    if (cloud) {
+      const res = await fetch(`${URL}/get/${KEY}`, {
+        headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      if (!res.ok) throw new Error(`Cloud-Speicher: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
+      const data = await res.json();
+      if (data.result) {
+        console.log('☁ Spielstände aus dem Cloud-Speicher geladen.');
+        result = JSON.parse(data.result);
+      } else {
+        console.log('☁ Cloud-Speicher verbunden (noch leer).');
+        result = {};
+      }
+    } else {
+      try {
+        result = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+      } catch { result = {}; }
+    }
+    status.loadOk = true;
+    return result;
+  } catch (e) {
+    status.loadOk = false;
+    status.loadError = e.message;
+    throw e;
+  }
 }
 
 async function save(accounts) {
-  if (cloud) {
-    const res = await fetch(`${URL}/set/${KEY}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${TOKEN}` },
-      body: JSON.stringify(accounts),
-    });
-    if (!res.ok) throw new Error(`Cloud-Speicher: HTTP ${res.status}`);
-    return;
+  try {
+    if (cloud) {
+      const res = await fetch(`${URL}/set/${KEY}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify(accounts),
+      });
+      if (!res.ok) throw new Error(`Cloud-Speicher: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
+    } else {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 1));
+    }
+    status.lastSaveOk = true;
+    status.lastSaveError = null;
+    status.lastSaveAt = new Date().toISOString();
+  } catch (e) {
+    status.lastSaveOk = false;
+    status.lastSaveError = e.message;
+    status.lastSaveAt = new Date().toISOString();
+    throw e;
   }
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 1));
 }
 
-module.exports = { load, save, cloud };
+module.exports = { load, save, cloud, status };

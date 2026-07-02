@@ -12,12 +12,24 @@ const { Server } = require('socket.io');
 
 const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, MONSTERS, SHOP_ITEMS, QUESTS } = require('./constants');
 const game = require('./game');
+const storage = require('./storage');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e6 });
 
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Diagnose: Speicher-Status einsehen (keine Geheimnisse enthalten)
+app.get('/api/status', (req, res) => {
+  res.json({
+    version: require('../package.json').version,
+    speicher: storage.status,
+    kontenGeladen: !!game.accountsReady,
+    konten: Object.keys(game.accounts || {}).length,
+    spielerOnline: game.players.size,
+  });
+});
 // three.js aus node_modules ausliefern (Kern + Addons für Bloom)
 app.use('/vendor/jsm', express.static(path.join(__dirname, '../node_modules/three/examples/jsm')));
 app.use('/vendor', express.static(path.join(__dirname, '../node_modules/three/build')));
