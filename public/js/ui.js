@@ -12,6 +12,7 @@ let handlers = {};
 let shopOpen = false;
 let shopNpc = null;
 let buffExpiry = { atk: 0, def: 0, speed: 0, light: 0 };
+let skullExpiry = 0;
 
 const TILE_MINI_COLORS = [
   '#1c4f7d', '#d8c07a', '#4d9040', '#2f6e2a', '#8d8d92',
@@ -107,6 +108,7 @@ export function setYou(y) {
   for (const b of ['atk', 'def', 'speed', 'light']) {
     buffExpiry[b] = y.buffs && y.buffs[b] > 0 ? now + y.buffs[b] : 0;
   }
+  skullExpiry = y.skullMs > 0 ? now + y.skullMs : 0;
 
   $('statName').textContent = `${y.name} — Level ${y.level} ${defs.VOCATIONS[y.vocation].name}`;
   const pct = (a, b) => Math.max(0, Math.min(100, (a / b) * 100)) + '%';
@@ -296,6 +298,7 @@ export function updateHotbar(now) {
   if (buffExpiry.def > now) parts.push(`🛡 Schutz (${Math.ceil((buffExpiry.def - now) / 1000)}s)`);
   if (buffExpiry.speed > now) parts.push(`💨 Tempo (${Math.ceil((buffExpiry.speed - now) / 1000)}s)`);
   if (buffExpiry.light > now) parts.push(`🔆 Licht (${Math.ceil((buffExpiry.light - now) / 1000)}s)`);
+  if (skullExpiry > now) parts.push(`💀 Totenkopf – Stadtverbot! (${Math.ceil((skullExpiry - now) / 1000)}s)`);
   $('buffBar').textContent = parts.join('  ');
 }
 

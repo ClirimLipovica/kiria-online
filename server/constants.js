@@ -174,11 +174,12 @@ const QUESTS = {
 const MOUNT_SPEED = 0.6;  // Faktor auf die Schrittzeit (kleiner = schneller)
 const HASTE_SPEED = 0.65;
 const FOOD_MAX = 900;     // Sekunden
+const SKULL_MS = 60000;   // Totenkopf nach PvP-Angriff: 60 Sekunden Stadtverbot
 
 function xpForLevel(lvl) { return 100 * (lvl - 1) * (lvl - 1); }
 function petXpForLevel(lvl) { return 60 * (lvl - 1) * (lvl - 1); }
 
 module.exports = {
   TILE, WALKABLE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS,
-  SHOP_ITEMS, QUESTS, MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, xpForLevel, petXpForLevel,
+  SHOP_ITEMS, QUESTS, MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
 };

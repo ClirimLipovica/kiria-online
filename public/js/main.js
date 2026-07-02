@@ -254,8 +254,9 @@ socket.on('chat', (d) => {
     if (m) ui.setOnlineCount(parseInt(m[1], 10));
   } else {
     ui.chatMsg(d.from, d.text);
+    // Sprechblase über dem Kopf (auch bei dir selbst)
     const e = entities.get(d.id);
-    if (e && d.id !== selfId) fx.floatText(d.text.slice(0, 26), e.group.position, '#cfe8ff', 0.8);
+    if (e && e.group.visible) e.say(d.text);
   }
 });
 
@@ -342,6 +343,10 @@ function handleEvent(ev) {
       if (e) e.setLight(ev.dur);
       break;
     }
+    case 'skull': {
+      if (e) e.setMark(ev.on ? '💀' : null, '#ffffff');
+      break;
+    }
     case 'outfit': {
       if (e) e.setOutfit(ev.outfit);
       if (ev.id === selfId && you) you.outfit = ev.outfit;
@@ -400,11 +405,13 @@ function handleEvent(ev) {
   }
 }
 
-// ================= ZIEL / KAMPF (auch PvP) =================
+// ================= ZIEL / KAMPF (auch PvP + gegnerische Tiere) =================
 function setTarget(id) {
   clearTarget();
   const e = entities.get(id);
-  if (!e || (e.kind !== 'monster' && e.kind !== 'player') || e.dead || id === selfId) return;
+  if (!e || e.dead || id === selfId) return;
+  const targetable = e.kind === 'monster' || e.kind === 'player' || (e.kind === 'pet' && e.ownerId !== selfId);
+  if (!targetable) return;
   targetId = id;
   socket.emit('setTarget', { id });
   ui.setTargetDisplay(e);
@@ -479,7 +486,8 @@ function initInput() {
       if (o && o.userData.entityId) {
         const ent = entities.get(o.userData.entityId);
         if (!ent || ent.dead || !ent.group.visible) continue;
-        if (ent.kind === 'monster' || (ent.kind === 'player' && ent.id !== selfId)) { setTarget(ent.id); return; }
+        if (ent.kind === 'monster' || (ent.kind === 'player' && ent.id !== selfId)
+            || (ent.kind === 'pet' && ent.ownerId !== selfId)) { setTarget(ent.id); return; }
         if (ent.kind === 'corpse') {
           const me = self();
           const d = Math.max(Math.abs(me.tx - ent.tx), Math.abs(me.ty - ent.ty));

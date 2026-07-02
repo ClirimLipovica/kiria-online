@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS,
-  MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, xpForLevel, petXpForLevel,
+  MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
 } = require('./constants');
 const { generateWorld, isWalkable } = require('./world');
 
@@ -240,8 +240,20 @@ function publicPlayer(p) {
   return {
     id: p.id, name: p.name, vocation: p.vocation, outfit: p.outfit,
     x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, level: p.level, dead: p.dead,
-    mounted: p.mounted,
+    mounted: p.mounted, skull: p.skullUntil > Date.now(),
   };
+}
+
+// Totenkopf: PvP-Angreifer dürfen 60 s lang keine Stadt betreten
+function markSkull(p) {
+  const now = Date.now();
+  const had = p.skullUntil > now;
+  p.skullUntil = now + SKULL_MS;
+  if (!had) {
+    events.push({ t: 'skull', id: p.id, on: true });
+    info(p, '💀 Du hast einen Totenkopf! Städte sind für dich 60 Sekunden gesperrt.');
+  }
+  dirtyPrivate.add(p.id);
 }
 
 function privatePlayer(p) {
@@ -256,6 +268,7 @@ function privatePlayer(p) {
       atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now),
       speed: Math.max(0, p.buffs.speed - now), light: Math.max(0, p.buffs.light - now),
     },
+    skullMs: Math.max(0, p.skullUntil - now),
     torchLight: !!(p.eq.shield && ITEMS[p.eq.shield].light),
     pet: p.pet ? {
       type: p.pet.type, name: p.pet.name, level: p.pet.level,
@@ -305,6 +318,7 @@ function createPlayer(socket, account) {
     mounted: null,
     petStable: save && save.petStable ? save.petStable : [],
     buffs: { atk: 0, def: 0, speed: 0, light: 0 },
+    skullUntil: 0, skullMsgAt: 0,
     pet: null,
     targetId: null, dead: false,
     nextMoveAt: 0, lastAtk: 0, potCd: 0, spellCds: {}, lastChat: 0,
@@ -526,6 +540,15 @@ function tryMove(p, dx, dy) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
   }
+  // Mit Totenkopf keine Stadt betreten
+  if (p.skullUntil > now && inTown(nx, ny) && !inTown(p.x, p.y)) {
+    events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
+    if (now - p.skullMsgAt > 2500) {
+      p.skullMsgAt = now;
+      info(p, `💀 Die Stadtwachen lassen dich nicht rein! Noch ${Math.ceil((p.skullUntil - now) / 1000)} Sekunden.`);
+    }
+    return;
+  }
   if (!isFree(nx, ny, p.id)) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
@@ -534,11 +557,13 @@ function tryMove(p, dx, dy) {
   place(p, nx, ny);
 }
 
-// Ziel darf Monster ODER Spieler sein (PvP)
+// Ziel darf Monster, Spieler oder gegnerisches Tier sein (PvP)
 function setTarget(p, id) {
   if (typeof id !== 'string' && id !== null) return;
   if (id === p.id) id = null;
-  p.targetId = id && (monsters.has(id) || players.has(id)) ? id : null;
+  const pt = id ? pets.get(id) : null;
+  if (pt && pt.ownerId === p.id) id = null; // eigenes Tier nicht angreifbar
+  p.targetId = id && (monsters.has(id) || players.has(id) || pets.has(id)) ? id : null;
 }
 
 function setOutfit(p, outfit) {
@@ -608,6 +633,7 @@ function castSpell(p, spellId) {
   } else if (spell.kind === 'missile') {
     const m = monsters.get(p.targetId);
     const enemy = players.get(p.targetId);
+    const enemyPet = pets.get(p.targetId);
     if (m && !m.dead) {
       if (cheb(p, m) > spell.range) return info(p, 'Ziel ist zu weit weg.');
       events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [m.x, m.y] });
@@ -617,6 +643,13 @@ function castSpell(p, spellId) {
       if (cheb(p, enemy) > spell.range) return info(p, 'Ziel ist zu weit weg.');
       events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [enemy.x, enemy.y] });
       applyDamageToPlayer(enemy, spellDamage(p, spell.base, spell.perLvl), p);
+      markSkull(p);
+    } else if (enemyPet && enemyPet.ownerId !== p.id) {
+      if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (cheb(p, enemyPet) > spell.range) return info(p, 'Ziel ist zu weit weg.');
+      events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
+      damagePet(enemyPet, spellDamage(p, spell.base, spell.perLvl), p);
+      markSkull(p);
     } else return info(p, 'Kein Ziel ausgewählt.');
 
   } else if (spell.kind === 'aoe1') {
@@ -919,8 +952,18 @@ function petAI(pet, now) {
   const owner = players.get(pet.ownerId);
   if (!owner) { removePet(pet); return; }
 
-  const tgt = owner.targetId ? monsters.get(owner.targetId) : null;
-  if (tgt && !tgt.dead && !owner.dead) {
+  // Ziel des Besitzers: Monster, feindlicher Spieler (PvP!) oder dessen Tier
+  let tgt = null, kind = null;
+  if (owner.targetId && !owner.dead) {
+    const m = monsters.get(owner.targetId);
+    const enemy = players.get(owner.targetId);
+    const enemyPet = pets.get(owner.targetId);
+    if (m && !m.dead) { tgt = m; kind = 'monster'; }
+    else if (enemy && !enemy.dead && !inTown(enemy.x, enemy.y) && !inTown(pet.x, pet.y)) { tgt = enemy; kind = 'player'; }
+    else if (enemyPet && enemyPet.ownerId !== owner.id && !inTown(enemyPet.x, enemyPet.y) && !inTown(pet.x, pet.y)) { tgt = enemyPet; kind = 'pet'; }
+  }
+
+  if (tgt) {
     const d = cheb(pet, tgt);
     if (d <= 1) {
       if (now - pet.lastAtk > 1500) {
@@ -928,8 +971,17 @@ function petAI(pet, now) {
         const stats = petStats(pet.type, pet.level);
         let dmg = stats.dmg * (0.6 + Math.random() * 0.5);
         if (pet.buffUntil > now) dmg *= 1.5;
+        dmg = Math.max(1, Math.round(dmg));
         events.push({ t: 'fx', kind: 'slash', from: [pet.x, pet.y], to: [tgt.x, tgt.y] });
-        damageMonster(tgt, Math.max(1, Math.round(dmg)), owner, 'melee', pet.id);
+        if (kind === 'monster') {
+          damageMonster(tgt, dmg, owner, 'melee', pet.id);
+        } else if (kind === 'player') {
+          applyDamageToPlayer(tgt, dmg, owner);
+          markSkull(owner); // Tier-Angriff zählt als PvP des Besitzers
+        } else {
+          damagePet(tgt, dmg, owner);
+          markSkull(owner);
+        }
       }
       return;
     }
@@ -969,6 +1021,7 @@ function playerAutoAttack(p, now) {
   const voc = VOCATIONS[p.vocation];
   const m = monsters.get(p.targetId);
   const enemy = players.get(p.targetId);
+  const enemyPet = pets.get(p.targetId);
 
   if (m && !m.dead) {
     const d = cheb(p, m);
@@ -978,7 +1031,7 @@ function playerAutoAttack(p, now) {
     events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [m.x, m.y] });
     damageMonster(m, meleeDamage(p), p, 'melee');
   } else if (enemy && !enemy.dead) {
-    // PvP: nur außerhalb der Städte
+    // PvP: nur außerhalb der Städte, Angreifer bekommt Totenkopf
     if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return;
     const d = cheb(p, enemy);
     if (d > voc.range) return;
@@ -986,6 +1039,17 @@ function playerAutoAttack(p, now) {
     p.lastAtk = now;
     events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [enemy.x, enemy.y] });
     applyDamageToPlayer(enemy, meleeDamage(p), p);
+    markSkull(p);
+  } else if (enemyPet && enemyPet.ownerId !== p.id) {
+    // Gegnerisches Tier angreifen = ebenfalls PvP
+    if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return;
+    const d = cheb(p, enemyPet);
+    if (d > voc.range) return;
+    if (now - p.lastAtk < BASE_ATK_MS) return;
+    p.lastAtk = now;
+    events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
+    damagePet(enemyPet, meleeDamage(p), p);
+    markSkull(p);
   } else {
     p.targetId = null;
   }
@@ -1049,6 +1113,13 @@ function tick() {
       // Ablaufende Buffs an den Client melden
       for (const b of ['atk', 'def', 'speed', 'light']) {
         if (p.buffs[b] && p.buffs[b] <= now) { p.buffs[b] = 0; changed = true; }
+      }
+      // Totenkopf abgelaufen?
+      if (p.skullUntil && p.skullUntil <= now) {
+        p.skullUntil = 0;
+        events.push({ t: 'skull', id: p.id, on: false });
+        info(p, 'Dein Totenkopf ist verschwunden – die Städte lassen dich wieder rein.');
+        changed = true;
       }
       if (tickCount % 100 === 0) changed = true; // Hunger-Anzeige aktuell halten
       if (changed) dirtyPrivate.add(p.id);

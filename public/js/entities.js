@@ -586,6 +586,9 @@ export class Entity {
     this.type = data.type || null;
     this.level = data.level || null;
     this.ownerName = data.ownerName || null;
+    this.ownerId = data.ownerId || null;
+    this.bubble = null;
+    this.bubbleUntil = 0;
     this.world = world;
     this.hp = data.hp ?? 1;
     this.maxHp = data.maxHp ?? 1;
@@ -631,6 +634,70 @@ export class Entity {
     this.group.position.set(data.x, gy, data.y);
 
     if (kind === 'player' && data.mounted) this.setMount(data.mounted);
+    if (kind === 'player' && data.skull) this.setMark('💀', '#ffffff');
+  }
+
+  // Sprechblase über dem Kopf (Chat)
+  say(text) {
+    if (this.bubble) {
+      this.group.remove(this.bubble);
+      this.bubble.material.map.dispose();
+      this.bubble.material.dispose();
+      this.bubble = null;
+    }
+    // Text in Zeilen umbrechen (max. 3 Zeilen)
+    const words = String(text).split(' ');
+    const lines = [''];
+    for (const w of words) {
+      if ((lines[lines.length - 1] + ' ' + w).trim().length > 22) {
+        if (lines.length >= 3) { lines[2] = lines[2].slice(0, 19) + '…'; break; }
+        lines.push(w);
+      } else {
+        lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + w).trim();
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 40 + lines.length * 28;
+    const ctx = canvas.getContext('2d');
+    // abgerundete Blase – dunkel, damit der Bloom-Effekt sie nicht überstrahlt
+    const r = 14, w2 = canvas.width - 4, h2 = canvas.height - 14;
+    const drawShape = () => {
+      ctx.beginPath();
+      ctx.moveTo(2 + r, 2);
+      ctx.lineTo(2 + w2 - r, 2);
+      ctx.arcTo(2 + w2, 2, 2 + w2, 2 + r, r);
+      ctx.lineTo(2 + w2, h2 - r);
+      ctx.arcTo(2 + w2, h2, 2 + w2 - r, h2, r);
+      ctx.lineTo(canvas.width / 2 + 10, h2);
+      ctx.lineTo(canvas.width / 2, canvas.height - 2);   // Sprech-Zipfel
+      ctx.lineTo(canvas.width / 2 - 10, h2);
+      ctx.lineTo(2 + r, h2);
+      ctx.arcTo(2, h2, 2, h2 - r, r);
+      ctx.lineTo(2, 2 + r);
+      ctx.arcTo(2, 2, 2 + r, 2, r);
+      ctx.closePath();
+    };
+    ctx.fillStyle = 'rgba(20,15,10,0.88)';
+    drawShape();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,165,90,0.9)';
+    ctx.lineWidth = 3;
+    drawShape();
+    ctx.stroke();
+    ctx.fillStyle = '#e8dfc8';
+    ctx.font = '22px Verdana';
+    ctx.textAlign = 'center';
+    lines.forEach((l, i) => ctx.fillText(l, canvas.width / 2, 30 + i * 27));
+
+    this.bubble = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas), depthTest: false, transparent: true,
+    }));
+    const scale = 2.0;
+    this.bubble.scale.set(scale, scale * canvas.height / canvas.width, 1);
+    this.bubble.position.y = this.labelY + 0.55 + (scale * canvas.height / canvas.width) / 2;
+    this.bubble.renderOrder = 940;
+    this.group.add(this.bubble);
+    this.bubbleUntil = performance.now() + 3200 + lines.join(' ').length * 60;
   }
 
   displayName() {
@@ -756,6 +823,14 @@ export class Entity {
     this.group.position.z = y;
     const gy = this.world.groundY(Math.round(x), Math.round(y));
     this.group.position.y += (gy - this.group.position.y) * Math.min(1, dt * 14);
+
+    // Sprechblase auslaufen lassen
+    if (this.bubble && now > this.bubbleUntil) {
+      this.group.remove(this.bubble);
+      this.bubble.material.map.dispose();
+      this.bubble.material.dispose();
+      this.bubble = null;
+    }
 
     if (this.kind === 'corpse') return;
 
