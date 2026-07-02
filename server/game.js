@@ -4,8 +4,7 @@
 // (Tempo/Licht), Leichen-Loot per Klick, Essen/Hunger, Mounts,
 // Tier-Stall des Bestienzüchters, Berufs-Ausrüstung.
 // ---------------------------------------------------------------
-const fs = require('fs');
-const path = require('path');
+const storage = require('./storage');
 const {
   MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS,
   MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
@@ -1149,40 +1148,51 @@ function tick() {
   dirtyPrivate = new Set();
 }
 
-// ---------------- Konten-Speicherung ----------------
-const DATA_DIR = path.join(__dirname, 'data');
-const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+// ---------------- Konten-Speicherung (Datei oder Cloud) ----------------
 let accounts = {};
+let saving = false;
 
-function loadAccounts() {
-  try {
-    accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
-  } catch { accounts = {}; }
-  module.exports.accounts = accounts;
-}
-
-function saveAccounts() {
+async function saveAccounts() {
   for (const p of players.values()) {
     const acc = accounts[p.accountKey];
     if (acc) acc.save = saveData(p);
   }
+  if (saving) return; // nicht doppelt gleichzeitig speichern
+  saving = true;
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 1));
-  } catch (e) { console.error('Speichern fehlgeschlagen:', e.message); }
+    await storage.save(accounts);
+  } catch (e) {
+    console.error('Speichern fehlgeschlagen:', e.message);
+  } finally {
+    saving = false;
+  }
 }
 
 function start(ioServer) {
   io = ioServer;
-  loadAccounts();
   initMonsters();
   setInterval(tick, TICK_MS);
-  setInterval(saveAccounts, 60000);
   console.log(`Welt bereit: ${monsters.size} Monster, ${world.towns.length} Städte, Karte ${world.size}x${world.size}`);
+  console.log(storage.cloud ? '☁ Speicher-Modus: Cloud (Upstash)' : '💾 Speicher-Modus: lokale Datei');
+  // Spielstände laden – Logins warten bis dahin
+  storage.load()
+    .then((data) => {
+      accounts = data;
+      module.exports.accounts = accounts;
+      module.exports.accountsReady = true;
+      setInterval(saveAccounts, 60000);
+      console.log(`Spielstände geladen: ${Object.keys(accounts).length} Konten.`);
+    })
+    .catch((e) => {
+      console.error('Spielstände konnten nicht geladen werden:', e.message);
+      // Notbetrieb ohne Persistenz, damit der Server nicht tot ist
+      module.exports.accountsReady = true;
+    });
 }
 
 module.exports = {
   world, players, monsters, pets, corpses, accounts,
+  accountsReady: false,
   start, saveAccounts, createPlayer, removePlayer, respawnPlayer,
   publicPlayer, privatePlayer, publicMonster, publicPet, publicCorpse, saveData,
   tryMove, setTarget, setOutfit, castSpell, usePotion, buyItem, sellItem,

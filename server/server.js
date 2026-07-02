@@ -35,6 +35,7 @@ io.on('connection', (socket) => {
     try {
       if (player) return;
       if (!data || typeof data !== 'object') return;
+      if (!game.accountsReady) return socket.emit('loginError', { msg: 'Server startet noch – versuch es in ein paar Sekunden nochmal.' });
       const name = String(data.name || '').trim();
       const password = String(data.password || '');
       const vocation = String(data.vocation || 'knight');
@@ -117,6 +118,7 @@ io.on('connection', (socket) => {
     if (!player) return;
     const acc = game.accounts[player.accountKey];
     if (acc) acc.save = game.saveData(player);
+    game.saveAccounts(); // sofort sichern (wichtig für Cloud-Speicher)
     game.removePlayer(player);
     socket.broadcast.emit('playerLeft', { id: player.id });
     io.emit('chat', { id: 'system', from: '⚔ Kiria', text: `${player.name} hat die Welt verlassen.` });
@@ -125,8 +127,15 @@ io.on('connection', (socket) => {
   });
 });
 
-process.on('SIGINT', () => { game.saveAccounts(); process.exit(0); });
-process.on('SIGTERM', () => { game.saveAccounts(); process.exit(0); });
+// Beim Herunterfahren (auch auf Render) erst speichern, dann beenden
+const shutdown = () => {
+  Promise.race([
+    game.saveAccounts(),
+    new Promise((r) => setTimeout(r, 5000)),
+  ]).finally(() => process.exit(0));
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
