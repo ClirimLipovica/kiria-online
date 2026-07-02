@@ -10,22 +10,39 @@ let defs = null;
 let you = null;
 let handlers = {};
 let shopOpen = false;
-let buffExpiry = { atk: 0, def: 0 };
+let shopNpc = null;
+let buffExpiry = { atk: 0, def: 0, speed: 0, light: 0 };
 
 const TILE_MINI_COLORS = [
   '#1c4f7d', '#d8c07a', '#4d9040', '#2f6e2a', '#8d8d92',
-  '#a39a83', '#6b5b4a', '#ff5a10', '#7d5f3a', '#6f5a40', '#9aa8b8',
+  '#a39a83', '#6b5b4a', '#ff5a10', '#7d5f3a', '#6f5a40', '#9aa8b8', '#a8814e',
 ];
 
 const SPELL_ICONS = {
-  exura: '💚', exura_gran: '💖',
+  exura: '💚', exura_gran: '💖', utani_hur: '💨', utevo_lux: '🔆',
   exori: '🌪️', exori_gran: '⚔️', utito: '💢',
   exori_san: '✨', exevo_san: '🌟', utamo: '🛡️',
   exori_flam: '🔥', exori_vis: '⚡', exevo_gran: '💥', exevo_mas: '☄️',
   utevo_bestia: '🐾', exura_bestia: '💗', utito_bestia: '🐺',
 };
 
-const SLOT_NAMES = { weapon: 'Waffe', armor: 'Rüstung', helmet: 'Helm', shield: 'Schild', boots: 'Stiefel' };
+const SLOT_NAMES = { weapon: 'Waffe', armor: 'Rüstung', legs: 'Hose', helmet: 'Helm', shield: 'Hand', boots: 'Stiefel' };
+const VOC_SHORT = { knight: 'Ritter', paladin: 'Paladin', sorcerer: 'Magier', tamer: 'Züchter' };
+
+function itemStat(item) {
+  if (item.atk) return `Atk ${item.atk}`;
+  if (item.kind === 'food') return `+${Math.floor(item.food / 60)} Min. satt`;
+  if (item.kind === 'mount') return 'Mount';
+  if (item.def !== undefined) return `Def ${item.def}${item.speed ? ', +Tempo' : ''}${item.light ? ', Licht' : ''}`;
+  if (item.heal) return `+${item.heal} HP`;
+  if (item.mana) return `+${item.mana} MP`;
+  return '';
+}
+
+function vocTag(item) {
+  if (!item.voc) return '';
+  return ` <small style="color:#c88a4a">[${item.voc.map((v) => VOC_SHORT[v]).join('/')}]</small>`;
+}
 
 // ---------------- Init ----------------
 export function initUI(gameDefs, h, vocation) {
@@ -87,8 +104,9 @@ export function focusChat() { $('chatInput').focus(); }
 export function setYou(y) {
   you = y;
   const now = performance.now();
-  buffExpiry.atk = y.buffs && y.buffs.atk > 0 ? now + y.buffs.atk : 0;
-  buffExpiry.def = y.buffs && y.buffs.def > 0 ? now + y.buffs.def : 0;
+  for (const b of ['atk', 'def', 'speed', 'light']) {
+    buffExpiry[b] = y.buffs && y.buffs[b] > 0 ? now + y.buffs[b] : 0;
+  }
 
   $('statName').textContent = `${y.name} — Level ${y.level} ${defs.VOCATIONS[y.vocation].name}`;
   const pct = (a, b) => Math.max(0, Math.min(100, (a / b) * 100)) + '%';
@@ -99,6 +117,17 @@ export function setYou(y) {
   const prev = 100 * (y.level - 1) * (y.level - 1);
   $('xpFill').style.width = pct(y.xp - prev, y.xpNext - prev);
   $('xpTxt').textContent = `XP: ${y.xp} / ${y.xpNext}`;
+
+  // Hunger
+  const f = $('foodTxt');
+  if (y.food > 0) {
+    const min = Math.floor(y.food / 60), sec = y.food % 60;
+    f.textContent = `🍗 Satt: ${min}:${String(sec).padStart(2, '0')}`;
+    f.style.color = y.food < 60 ? '#e8a53a' : '#8fd18a';
+  } else {
+    f.textContent = '🍗 HUNGRIG! Kaum Regeneration – iss etwas!';
+    f.style.color = '#ff7a6e';
+  }
 
   // Tier des Bestienzüchters
   if (y.pet) {
@@ -206,8 +235,8 @@ function buildHotbar(vocation) {
   HOTBAR = [];
   const spells = defs.VOCATIONS[vocation].spells;
   spells.forEach((sp, i) => HOTBAR.push({ key: String(i + 1), spell: sp, ico: SPELL_ICONS[sp] || '✴️' }));
-  HOTBAR.push({ key: '6', potion: 'hp', ico: '🧪', lbl: 'Heiltrank' });
-  HOTBAR.push({ key: '7', potion: 'mp', ico: '🔷', lbl: 'Manatrank' });
+  HOTBAR.push({ key: '8', potion: 'hp', ico: '🧪', lbl: 'Heiltrank' });
+  HOTBAR.push({ key: '9', potion: 'mp', ico: '🔷', lbl: 'Manatrank' });
 
   const bar = $('hotbar');
   bar.innerHTML = '';
@@ -263,8 +292,10 @@ export function updateHotbar(now) {
   }
   // Buff-Anzeige
   const parts = [];
-  if (buffExpiry.atk > now) parts.push(`⚔ +40% Angriff (${Math.ceil((buffExpiry.atk - now) / 1000)}s)`);
+  if (buffExpiry.atk > now) parts.push(`⚔ Angriff (${Math.ceil((buffExpiry.atk - now) / 1000)}s)`);
   if (buffExpiry.def > now) parts.push(`🛡 Schutz (${Math.ceil((buffExpiry.def - now) / 1000)}s)`);
+  if (buffExpiry.speed > now) parts.push(`💨 Tempo (${Math.ceil((buffExpiry.speed - now) / 1000)}s)`);
+  if (buffExpiry.light > now) parts.push(`🔆 Licht (${Math.ceil((buffExpiry.light - now) / 1000)}s)`);
   $('buffBar').textContent = parts.join('  ');
 }
 
@@ -333,13 +364,26 @@ function renderInventory() {
     const item = defs.ITEMS[id];
     const div = document.createElement('div');
     div.className = 'invItem';
-    const stat = item.atk ? `Atk ${item.atk}` : `Def ${item.def}`;
-    div.innerHTML = `<span>${item.name} <small style="color:#a89878">(${stat}, ${SLOT_NAMES[item.kind]})</small></span>`;
+    div.innerHTML = `<span>${item.name}${vocTag(item)} <small style="color:#a89878">(${itemStat(item)})</small></span>`;
     const btns = document.createElement('span');
-    const eq = document.createElement('button');
-    eq.textContent = 'Anlegen';
-    eq.onclick = () => handlers.equip(i);
-    btns.appendChild(eq);
+    if (SLOT_NAMES[item.kind]) {
+      const eq = document.createElement('button');
+      eq.textContent = 'Anlegen';
+      const wrongVoc = item.voc && !item.voc.includes(you.vocation);
+      if (wrongVoc) { eq.disabled = true; eq.style.opacity = 0.4; eq.title = 'Nicht für deinen Beruf'; }
+      eq.onclick = () => handlers.equip(i);
+      btns.appendChild(eq);
+    } else if (item.kind === 'food') {
+      const eat = document.createElement('button');
+      eat.textContent = '🍴 Essen';
+      eat.onclick = () => handlers.use(i);
+      btns.appendChild(eat);
+    } else if (item.kind === 'mount') {
+      const learn = document.createElement('button');
+      learn.textContent = '🐎 Lernen';
+      learn.onclick = () => handlers.use(i);
+      btns.appendChild(learn);
+    }
     if (shopOpen) {
       const sell = document.createElement('button');
       sell.textContent = `Verkauf ${Math.floor(item.price / 2)}g`;
@@ -350,24 +394,71 @@ function renderInventory() {
     b.appendChild(div);
   });
 
-  // Tier (Bestienzüchter)
+  // Mounts (Reittiere)
+  if (you.mounts && you.mounts.length) {
+    const mDiv = document.createElement('div');
+    mDiv.innerHTML = `<h3 style="margin-top:10px">🐎 Reittiere (Taste R)</h3>`;
+    b.appendChild(mDiv);
+    const MOUNT_NAMES = { horse: 'Pferd', wolf: 'Wolf', bear: 'Bär', giant_spider: 'Riesenspinne', minotaur: 'Minotaurus', golem: 'Steingolem', wyrm: 'Wyrm', dragon: 'Drache' };
+    for (const mt of you.mounts) {
+      const div = document.createElement('div');
+      div.className = 'invItem';
+      const riding = you.mounted === mt;
+      div.innerHTML = `<span>${riding ? '▶ ' : ''}${MOUNT_NAMES[mt] || mt}</span>`;
+      const btn = document.createElement('button');
+      btn.textContent = riding ? 'Absteigen' : 'Reiten';
+      btn.onclick = () => handlers.mount(riding ? null : mt);
+      div.appendChild(btn);
+      b.appendChild(div);
+    }
+  }
+
+  // Tiere des Bestienzüchters (aktiv + Stall)
   if (you.vocation === 'tamer') {
     const petDiv = document.createElement('div');
     if (you.pet) {
-      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Dein Tier</h3>
+      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Aktives Tier</h3>
         <div class="row"><span>${you.pet.name}</span><b>Stufe ${you.pet.level}</b></div>
         <div class="row"><span>Leben</span><b>${you.pet.hp} / ${you.pet.maxHp}</b></div>
         <div class="row"><span>XP</span><b>${you.pet.xp} / ${you.pet.xpNext}</b></div>`;
-      const btn = document.createElement('button');
-      btn.textContent = 'Tier entlassen';
-      btn.style.cssText = 'margin-top:4px;font-size:11px;padding:3px 10px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:4px';
-      btn.onclick = () => { if (confirm('Tier wirklich entlassen?')) handlers.dismissPet(); };
-      petDiv.appendChild(btn);
+      const stash = document.createElement('button');
+      stash.textContent = '🏠 In den Stall';
+      stash.style.cssText = 'margin-top:4px;margin-right:4px;font-size:11px;padding:3px 10px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:4px';
+      stash.onclick = () => handlers.petStash();
+      const free = document.createElement('button');
+      free.textContent = 'Freilassen';
+      free.style.cssText = stash.style.cssText;
+      free.onclick = () => { if (confirm('Tier wirklich freilassen?')) handlers.dismissPet(); };
+      petDiv.appendChild(stash);
+      petDiv.appendChild(free);
     } else {
-      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Dein Tier</h3>
-        <div class="row" style="color:#776a55">Kein Tier gezähmt. Schwäche eine Bestie unter 60% Leben und sprich Utevo Bestia (Taste 2)!</div>`;
+      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Aktives Tier</h3>
+        <div class="row" style="color:#776a55">Kein aktives Tier. Schwäche eine Bestie unter 60% und sprich Utevo Bestia (Taste 2)!</div>`;
     }
     b.appendChild(petDiv);
+
+    const stableDiv = document.createElement('div');
+    stableDiv.innerHTML = `<h3 style="margin-top:10px">🏠 Stall (${(you.petStable || []).length}/6)</h3>`;
+    b.appendChild(stableDiv);
+    (you.petStable || []).forEach((entry, i) => {
+      const div = document.createElement('div');
+      div.className = 'invItem';
+      const MOUNT_NAMES2 = { rat: 'Ratte', snake: 'Schlange', spider: 'Spinne', wolf: 'Wolf', bear: 'Bär', giant_spider: 'Riesenspinne' };
+      div.innerHTML = `<span>${MOUNT_NAMES2[entry.type] || entry.type} <small style="color:#a89878">Stufe ${entry.level}</small></span>`;
+      const btns = document.createElement('span');
+      const dep = document.createElement('button');
+      dep.textContent = 'Einsetzen';
+      dep.disabled = !!you.pet;
+      if (dep.disabled) dep.style.opacity = 0.4;
+      dep.onclick = () => handlers.petDeploy(i);
+      const rel = document.createElement('button');
+      rel.textContent = 'Freilassen';
+      rel.onclick = () => { if (confirm('Tier wirklich freilassen?')) handlers.petRelease(i); };
+      btns.appendChild(dep);
+      btns.appendChild(rel);
+      div.appendChild(btns);
+      b.appendChild(div);
+    });
   }
 
   // Skin ändern
@@ -378,10 +469,11 @@ function renderInventory() {
   b.appendChild(skinBtn);
 }
 
-// ---------------- Shop ----------------
-export function openShop(npcName) {
+// ---------------- Shop (Sortiment je Händler) ----------------
+export function openShop(npc) {
   shopOpen = true;
-  if (npcName) $('shopTitle').textContent = `🏪 ${npcName}s Laden`;
+  shopNpc = npc || null;
+  $('shopTitle').textContent = `🏪 ${npc ? npc.name + 's' : ''} Laden`;
   $('shopBox').style.display = 'block';
   $('invBox').style.display = 'block';
   renderShop();
@@ -390,6 +482,7 @@ export function openShop(npcName) {
 
 export function closeShop() {
   shopOpen = false;
+  shopNpc = null;
   $('shopBox').style.display = 'none';
   renderInventory();
 }
@@ -401,12 +494,12 @@ function renderShop() {
   $('shopGold').textContent = `Dein Gold: 💰 ${you.gold}`;
   const box = $('shopItems');
   box.innerHTML = '';
-  for (const id of defs.SHOP_ITEMS) {
+  const list = (shopNpc && shopNpc.shop) || defs.SHOP_ITEMS;
+  for (const id of list) {
     const item = defs.ITEMS[id];
     const div = document.createElement('div');
     div.className = 'invItem';
-    const stat = item.atk ? `Atk ${item.atk}` : item.def ? `Def ${item.def}` : (item.heal ? `+${item.heal} HP` : `+${item.mana} MP`);
-    div.innerHTML = `<span>${item.name} <small style="color:#a89878">(${stat})</small></span>`;
+    div.innerHTML = `<span>${item.name}${vocTag(item)} <small style="color:#a89878">(${itemStat(item)})</small></span>`;
     const buy = document.createElement('button');
     buy.textContent = `${item.price}g`;
     buy.disabled = you.gold < item.price;
@@ -436,7 +529,7 @@ export function openDialog(npc) {
     const btn = document.createElement('button');
     btn.textContent = '🏪 Handeln';
     btn.style.cssText = 'font-size:12px;padding:5px 12px;cursor:pointer;background:#2a3a1a;border:1px solid #5a7a26;color:#c8e865;border-radius:5px';
-    btn.onclick = () => { closeDialog(); openShop(npc.name); };
+    btn.onclick = () => { closeDialog(); openShop(npc); };
     box.appendChild(btn);
   }
 
@@ -487,9 +580,63 @@ export function showDeath(show) {
   $('deathBox').style.display = show ? 'flex' : 'none';
 }
 
-// ---------------- Minimap ----------------
+// ---------------- Minimap + große Karte ----------------
 let miniBase = null;
 let miniWorld = null;
+let miniView = { sx: 0, sy: 0, scale: 1 };
+let bigMapScale = 1;
+
+// Klick auf die Minimap → dorthin laufen (wie in Tibia)
+export function initMinimapClick(onWalk) {
+  $('minimap').addEventListener('click', (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    onWalk(Math.round(miniView.sx + px / miniView.scale), Math.round(miniView.sy + py / miniView.scale));
+  });
+  $('bigMapCanvas').addEventListener('click', (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (e.currentTarget.width / rect.width);
+    const py = (e.clientY - rect.top) * (e.currentTarget.height / rect.height);
+    onWalk(Math.round(px / bigMapScale), Math.round(py / bigMapScale));
+    toggleBigMap(null, true);
+  });
+  $('bigMapClose').addEventListener('click', () => toggleBigMap(null, true));
+}
+
+// Große Weltkarte (Taste M)
+export function toggleBigMap(selfEntity, forceClose = false) {
+  const box = $('bigMap');
+  if (forceClose || box.style.display === 'flex') {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'flex';
+  const cv = $('bigMapCanvas');
+  const ctx = cv.getContext('2d');
+  bigMapScale = cv.width / miniWorld.size;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(miniBase, 0, 0, cv.width, cv.height);
+  // Städtenamen
+  ctx.font = 'bold 15px Georgia';
+  ctx.textAlign = 'center';
+  for (const t of miniWorld.towns || []) {
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
+    ctx.fillStyle = '#e8c165';
+    ctx.fillText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
+  }
+  // Eigene Position
+  if (selfEntity) {
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(selfEntity.tx * bigMapScale, selfEntity.ty * bigMapScale, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
 
 export function initMinimap(world) {
   miniWorld = world;
@@ -497,12 +644,19 @@ export function initMinimap(world) {
   miniBase.width = world.size;
   miniBase.height = world.size;
   const ctx = miniBase.getContext('2d');
-  for (let y = 0; y < world.size; y++) {
-    for (let x = 0; x < world.size; x++) {
-      ctx.fillStyle = TILE_MINI_COLORS[world.tiles[y * world.size + x]] || '#000';
-      ctx.fillRect(x, y, 1, 1);
-    }
+  // Schnell per ImageData (1,3 Mio. Kacheln)
+  const rgb = TILE_MINI_COLORS.map((c) => [
+    parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16),
+  ]);
+  const img = ctx.createImageData(world.size, world.size);
+  for (let i = 0; i < world.tiles.length; i++) {
+    const col = rgb[world.tiles[i]] || [0, 0, 0];
+    img.data[i * 4] = col[0];
+    img.data[i * 4 + 1] = col[1];
+    img.data[i * 4 + 2] = col[2];
+    img.data[i * 4 + 3] = 255;
   }
+  ctx.putImageData(img, 0, 0);
 }
 
 export function updateMinimap(entities, selfId) {
@@ -517,6 +671,7 @@ export function updateMinimap(entities, selfId) {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(miniBase, sx, sy, view, view, 0, 0, cv.width, cv.height);
   const scale = cv.width / view;
+  miniView = { sx, sy, scale };
   for (const e of entities.values()) {
     if (e.dead) continue;
     const px = (e.tx - sx) * scale, py = (e.ty - sy) * scale;

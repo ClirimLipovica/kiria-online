@@ -6,9 +6,10 @@
 // Vögel, Wolken, Kaninchen, Rehe, fallende Blätter, Glühwürmchen.
 // ---------------------------------------------------------------
 import * as THREE from 'three';
+import { makeAnimal } from './entities.js';
 
-export const TILE = { WATER: 0, SAND: 1, GRASS: 2, TREE: 3, ROCK: 4, ROAD: 5, WALL: 6, LAVA: 7, DIRT: 8, GRAVE: 9, FOUNTAIN: 10 };
-export const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE]);
+export const TILE = { WATER: 0, SAND: 1, GRASS: 2, TREE: 3, ROCK: 4, ROAD: 5, WALL: 6, LAVA: 7, DIRT: 8, GRAVE: 9, FOUNTAIN: 10, FLOOR: 11 };
+export const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR]);
 export const H_STEP = 0.45;
 
 const CHUNK = 32;
@@ -18,8 +19,8 @@ const KEEP_CHUNKS = 8;   // darüber hinaus: Speicher freigeben
 const TILE_COLORS = {
   [TILE.WATER]: 0x1d5585, [TILE.SAND]: 0xe0c887, [TILE.GRASS]: 0x58a34c,
   [TILE.TREE]: 0x4a8a3e,  [TILE.ROCK]: 0x8d8d92, [TILE.ROAD]: 0xaaa189,
-  [TILE.WALL]: 0x6b5b4a,  [TILE.LAVA]: 0x2a1a12, [TILE.DIRT]: 0x86663e,
-  [TILE.GRAVE]: 0x6f5a40, [TILE.FOUNTAIN]: 0x9aa8b8,
+  [TILE.WALL]: 0x8a7a66,  [TILE.LAVA]: 0x2a1a12, [TILE.DIRT]: 0x86663e,
+  [TILE.GRAVE]: 0x6f5a40, [TILE.FOUNTAIN]: 0x9aa8b8, [TILE.FLOOR]: 0xa8814e,
 };
 
 function mulberry32(a) {
@@ -40,9 +41,13 @@ export class World3D {
     this.buildings = data.buildings;
     this.towns = data.towns || [];
     this.fountainList = data.fountains || [];
+    this.farm = data.farm || null;
+    this.playerLightBoost = false; // Fackel / Utevo Lux des eigenen Helden
     this.time = 100;
     this.chunks = new Map();
     this._lastChunkAt = 0;
+    this.wallGeo = new THREE.BoxGeometry(1, 1.9, 1);
+    this.wallMat = new THREE.MeshLambertMaterial({ color: 0xb8a890 });
 
     // geteilte Materialien/Geometrien für Chunks
     this.groundMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -119,7 +124,7 @@ export class World3D {
 
     const pos = [], col = [], idxArr = [];
     const lavaPos = [], lavaIdx = [];
-    const trees = [], rocks = [], graves = [], tufts = [], flowers = [];
+    const trees = [], rocks = [], graves = [], tufts = [], flowers = [], walls = [];
     const c = new THREE.Color();
     let v = 0, lv = 0;
 
@@ -163,6 +168,7 @@ export class World3D {
           lavaIdx.push(lv, lv + 1, lv + 2, lv, lv + 2, lv + 3);
           lv += 4;
         } else if (t === TILE.TREE) trees.push([x, y]);
+        else if (t === TILE.WALL) walls.push([x, y]);
         else if (t === TILE.ROCK && rand() < 0.3) rocks.push([x, y]);
         else if (t === TILE.GRAVE) graves.push([x, y]);
         else if (t === TILE.GRASS) {
@@ -194,6 +200,19 @@ export class World3D {
     const q = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const cc = new THREE.Color();
+
+    // 3D-Mauern (Häuser, Festungen, Ruinen)
+    if (walls.length) {
+      const mesh = new THREE.InstancedMesh(this.wallGeo, this.wallMat, walls.length);
+      walls.forEach(([x, y], i) => {
+        m4.compose(new THREE.Vector3(x, this.groundY(x, y) + 0.95, y), q.identity(), new THREE.Vector3(1, 1, 1));
+        mesh.setMatrixAt(i, m4);
+        cc.setHex(0xffffff).multiplyScalar(0.9 + rand() * 0.18);
+        mesh.setColorAt(i, cc);
+      });
+      mesh.castShadow = mesh.receiveShadow = true;
+      group.add(mesh);
+    }
 
     if (trees.length) {
       const trunks = new THREE.InstancedMesh(this.trunkGeo, this.trunkMat, trees.length);
@@ -280,43 +299,38 @@ export class World3D {
     this.scene.add(this.water);
   }
 
-  // ================= GEBÄUDE =================
+  // ================= GEBÄUDE-DÄCHER =================
+  // Wände kommen aus den Kacheln (begehbar!), hier nur die Dächer.
+  // Steht der eigene Held im Haus, wird das Dach ausgeblendet.
   _buildBuildings() {
-    const wallMats = {
-      temple: new THREE.MeshLambertMaterial({ color: 0xd8d2c2 }),
-      shop: new THREE.MeshLambertMaterial({ color: 0xc0a271 }),
-      house: new THREE.MeshLambertMaterial({ color: 0xb08f70 }),
-    };
     const roofMats = {
       temple: new THREE.MeshLambertMaterial({ color: 0x3a6ea8 }),
       shop: new THREE.MeshLambertMaterial({ color: 0x8a4a2a }),
       house: new THREE.MeshLambertMaterial({ color: 0x9a3f2f }),
     };
-    const doorMat = new THREE.MeshLambertMaterial({ color: 0x3a2a18 });
-
+    this.roofs = [];
     for (const b of this.buildings) {
       const cx = b.x + b.w / 2 - 0.5;
       const cz = b.y + b.h / 2 - 0.5;
-      const gy = this.groundY(b.x, b.y);
-      const wallH = b.kind === 'temple' ? 2.6 : 1.8;
-
-      const walls = new THREE.Mesh(new THREE.BoxGeometry(b.w, wallH, b.h), wallMats[b.kind]);
-      walls.position.set(cx, gy + wallH / 2, cz);
-      walls.castShadow = walls.receiveShadow = true;
-      this.scene.add(walls);
-
+      const gy = this.groundY(b.doorX ?? b.x, b.y + b.h - 1);
+      const wallH = 1.9;
       const roofH = b.kind === 'temple' ? 1.6 : 1.1;
       const roofR = Math.sqrt(b.w * b.w + b.h * b.h) / 2;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(roofR, roofH, 4), roofMats[b.kind]);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(roofR, roofH, 4), roofMats[b.kind] || roofMats.house);
       roof.rotation.y = Math.PI / 4;
       roof.scale.set((b.w + 0.7) / (roofR * Math.SQRT2), 1, (b.h + 0.7) / (roofR * Math.SQRT2));
       roof.position.set(cx, gy + wallH + roofH / 2, cz);
       roof.castShadow = true;
       this.scene.add(roof);
+      this.roofs.push({ roof, b });
+    }
+  }
 
-      const door = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.1), doorMat);
-      door.position.set(cx, gy + 0.55, b.y + b.h - 0.5 + 0.51);
-      this.scene.add(door);
+  // Dach des Gebäudes ausblenden, in dem der Spieler steht
+  updateRoofs(px, py) {
+    for (const { roof, b } of this.roofs) {
+      const inside = px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h;
+      roof.visible = !inside;
     }
   }
 
@@ -573,6 +587,28 @@ export class World3D {
       this.critters.push({ g, deer, x: 0, y: 0, tx: 0, ty: 0, timer: 0, hop: rand() * 10, placed: false });
     }
 
+    // Hoftiere (bleiben auf der Koppel) + Katzen/Hunde in den Städten
+    this.farmAnimals = [];
+    const addFarmAnimal = (type, bounds) => {
+      const g = makeAnimal(type);
+      const x = bounds.x + 1 + rand() * (bounds.w - 2);
+      const y = bounds.y + 1 + rand() * (bounds.h - 2);
+      g.position.set(x, this.groundY(Math.round(x), Math.round(y)), y);
+      this.scene.add(g);
+      this.farmAnimals.push({ g, type, bounds, x, y, tx: x, ty: y, timer: rand() * 4, hop: rand() * 10 });
+    };
+    if (this.farm) {
+      const inner = { x: this.farm.x + 1, y: this.farm.y + 1, w: this.farm.w - 2, h: this.farm.h - 8 };
+      for (let i = 0; i < 3; i++) addFarmAnimal('horse', inner);
+      for (let i = 0; i < 3; i++) addFarmAnimal('cow', inner);
+      for (let i = 0; i < 2; i++) addFarmAnimal('goat', inner);
+    }
+    for (const t of this.towns) {
+      const around = { x: t.cx - 8, y: t.cy - 8, w: 16, h: 16 };
+      addFarmAnimal('cat', around);
+      addFarmAnimal('dog', around);
+    }
+
     this.torch = new THREE.PointLight(0xffaa55, 0, 9, 1.6);
     this.scene.add(this.torch);
   }
@@ -700,8 +736,37 @@ export class World3D {
       }
       fp.needsUpdate = true;
     }
-    this.torch.intensity = night * 1.6;
+    // Fackel/Licht: mit ausgerüsteter Fackel oder Utevo Lux viel heller
+    this.torch.intensity = night * (this.playerLightBoost ? 3.2 : 1.2);
+    this.torch.distance = this.playerLightBoost ? 15 : 8;
     this.torch.position.set(center.x, center.y + 1.7, center.z);
+
+    // Hoftiere, Katzen und Hunde
+    for (const fa of this.farmAnimals) {
+      if (Math.abs(fa.x - center.x) > 70 || Math.abs(fa.y - center.z) > 70) { fa.g.visible = false; continue; }
+      fa.g.visible = true;
+      fa.timer -= dt;
+      if (fa.timer <= 0) {
+        fa.timer = 2.5 + Math.random() * 5;
+        fa.tx = fa.bounds.x + 1 + Math.random() * (fa.bounds.w - 2);
+        fa.ty = fa.bounds.y + 1 + Math.random() * (fa.bounds.h - 2);
+      }
+      const dx = fa.tx - fa.x, dy = fa.ty - fa.y;
+      const d = Math.hypot(dx, dy);
+      const spd = fa.type === 'cat' || fa.type === 'dog' ? 1.4 : 0.7;
+      if (d > 0.1) {
+        fa.x += (dx / d) * Math.min(d, spd * dt);
+        fa.y += (dy / d) * Math.min(d, spd * dt);
+        fa.g.rotation.y = Math.atan2(dx, dy);
+        fa.hop += dt * 8;
+        const a = fa.g.userData.anim;
+        if (a && a.legs) {
+          const swing = Math.sin(fa.hop) * 0.5;
+          a.legs.forEach((l, i) => { l.rotation.x = (i % 2 === 0 ? swing : -swing); });
+        }
+      }
+      fa.g.position.set(fa.x, this.groundY(Math.round(fa.x), Math.round(fa.y)), fa.y);
+    }
 
     // Fackel-Flammen flackern
     for (const f of this.flames) {

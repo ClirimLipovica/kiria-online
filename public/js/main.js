@@ -16,10 +16,12 @@ import * as ui from './ui.js';
 const socket = io();
 
 const MONSTER_MOVE_MS = {
-  rat: 650, snake: 700, spider: 480, wolf: 450, orc: 550, troll: 620,
-  skeleton: 600, ghost: 480, zombie: 780, hunter: 520, bear: 560,
-  ghoul: 520, orc_berserker: 480, banshee: 480, werewolf: 400,
-  minotaur: 520, cyclops: 620, wyrm: 500, dragon: 520, demon: 540,
+  rat: 650, crab: 700, snake: 700, spider: 480, wolf: 450, goblin: 500,
+  orc: 550, scorpion: 520, troll: 620, skeleton: 600, ghost: 480,
+  zombie: 780, hunter: 520, bear: 560, ghoul: 520, orc_berserker: 480,
+  banshee: 480, werewolf: 400, mummy: 650, giant_spider: 440,
+  minotaur: 520, cyclops: 620, vampire: 460, golem: 750,
+  fire_elemental: 520, wyrm: 500, dragon: 520, demon: 540,
 };
 
 const FX_COLORS = {
@@ -122,17 +124,24 @@ socket.on('welcome', (data) => {
     equip: (index) => socket.emit('equip', { index }),
     unequip: (slot) => socket.emit('unequip', { slot }),
     dismissPet: () => socket.emit('dismissPet'),
+    petStash: () => socket.emit('petStash'),
+    petDeploy: (index) => socket.emit('petDeploy', { index }),
+    petRelease: (index) => socket.emit('petRelease', { index }),
+    use: (index) => socket.emit('use', { index }),
+    mount: (type) => socket.emit('mountToggle', { type }),
     outfit: () => socket.emit('outfit', { outfit: ((you.outfit || 0) + 1) % OUTFITS.length }),
     respawn: () => socket.emit('respawn'),
     questAccept: (id) => socket.emit('questAccept', { id }),
     questComplete: (id) => socket.emit('questComplete', { id }),
   }, you.vocation);
   ui.setYou(you);
+  ui.initMinimapClick((tx, ty) => walkTowards(tx, ty));
 
   addEntity(data.you, 'player');
   for (const p of data.players) addEntity(p, 'player');
   for (const m of data.monsters) addEntity(m, 'monster');
   for (const pet of data.pets) addEntity(pet, 'pet');
+  for (const c of data.corpses) addEntity(c, 'corpse');
   for (const n of data.world.npcs) {
     npcData.set(n.id, n);
     addEntity({ ...n, hp: 1, maxHp: 1 }, 'npc');
@@ -195,7 +204,7 @@ function removeEntity(id) {
 
 function entityBlockedAt(x, y, ignoreId) {
   for (const e of entities.values()) {
-    if (e.id === ignoreId || e.dead || e.kind === 'npc' || e.kind === 'pet') continue;
+    if (e.id === ignoreId || e.dead || e.kind === 'npc' || e.kind === 'pet' || e.kind === 'corpse') continue;
     if (e.tx === x && e.ty === y) return true;
   }
   return false;
@@ -233,6 +242,8 @@ socket.on('you', (y) => {
   ui.setYou(y);
   const e = self();
   if (e) e.setHp(y.hp, y.maxHp);
+  // Fackel oder Utevo Lux → helles Licht bei Nacht
+  if (world) world.playerLightBoost = !!(y.torchLight || (y.buffs && y.buffs.light > 0));
   updateNpcMarks();
 });
 
@@ -320,6 +331,17 @@ function handleEvent(ev) {
     }
     case 'spawn': addEntity(ev.monster, 'monster'); break;
     case 'pet': addEntity(ev.pet, 'pet'); break;
+    case 'corpse': addEntity(ev.corpse, 'corpse'); break;
+    case 'corpseGone': removeEntity(ev.id); break;
+    case 'mount': {
+      if (e) e.setMount(ev.mount);
+      if (ev.id === selfId && you) you.mounted = ev.mount;
+      break;
+    }
+    case 'light': {
+      if (e) e.setLight(ev.dur);
+      break;
+    }
     case 'outfit': {
       if (e) e.setOutfit(ev.outfit);
       if (ev.id === selfId && you) you.outfit = ev.outfit;
@@ -378,11 +400,11 @@ function handleEvent(ev) {
   }
 }
 
-// ================= ZIEL / KAMPF =================
+// ================= ZIEL / KAMPF (auch PvP) =================
 function setTarget(id) {
   clearTarget();
   const e = entities.get(id);
-  if (!e || e.kind !== 'monster' || e.dead) return;
+  if (!e || (e.kind !== 'monster' && e.kind !== 'player') || e.dead || id === selfId) return;
   targetId = id;
   socket.emit('setTarget', { id });
   ui.setTargetDisplay(e);
@@ -428,11 +450,13 @@ function initInput() {
     if (k === 'enter') { ui.focusChat(); e.preventDefault(); return; }
     if (k === 'i') { ui.toggleInventory(); return; }
     if (k === 'l') { ui.toggleQuestLog(); return; }
-    if (k === 'm') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }
+    if (k === 'm') { ui.toggleBigMap(self()); return; }
+    if (k === 'r') { socket.emit('mountToggle', { type: you && you.mounted ? null : (you.mounts && you.mounts[0]) }); return; }
+    if (k === 'k') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }
     if (k === 'q') { camYawTarget += Math.PI / 4; return; }
     if (k === 'e') { camYawTarget -= Math.PI / 4; return; }
-    if (k === 'escape') { clearTarget(); ui.closeShop(); ui.closeDialog(); return; }
-    if (['1', '2', '3', '4', '5', '6', '7'].includes(k)) { ui.activateSlotByKey(k); return; }
+    if (k === 'escape') { clearTarget(); ui.closeShop(); ui.closeDialog(); ui.toggleBigMap(null, true); return; }
+    if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(k)) { ui.activateSlotByKey(k); return; }
     if (KEYMAP[k]) { keys.add(k); pathQueue = []; e.preventDefault(); }
   });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -455,7 +479,14 @@ function initInput() {
       if (o && o.userData.entityId) {
         const ent = entities.get(o.userData.entityId);
         if (!ent || ent.dead || !ent.group.visible) continue;
-        if (ent.kind === 'monster') { setTarget(ent.id); return; }
+        if (ent.kind === 'monster' || (ent.kind === 'player' && ent.id !== selfId)) { setTarget(ent.id); return; }
+        if (ent.kind === 'corpse') {
+          const me = self();
+          const d = Math.max(Math.abs(me.tx - ent.tx), Math.abs(me.ty - ent.ty));
+          if (d <= 2) socket.emit('loot', { id: ent.id });
+          else walkTowards(ent.tx, ent.ty);
+          return;
+        }
         if (ent.kind === 'npc') {
           const me = self();
           const d = Math.max(Math.abs(me.tx - ent.tx), Math.abs(me.ty - ent.ty));
@@ -488,7 +519,7 @@ function findPath(sx, sy, tx, ty, allowDest = false) {
 
   const blocked = new Set();
   for (const e of entities.values()) {
-    if (e.id === selfId || e.dead || e.kind === 'npc' || e.kind === 'pet') continue;
+    if (e.id === selfId || e.dead || e.kind === 'npc' || e.kind === 'pet' || e.kind === 'corpse') continue;
     blocked.add(e.tx + ',' + e.ty);
   }
 
@@ -629,6 +660,7 @@ function loop(now) {
     if (now - lastMini > 250) {
       lastMini = now;
       updateVisibility();
+      world.updateRoofs(me.tx, me.ty);
       ui.updateMinimap(entities, selfId);
       let n = 0;
       for (const e of entities.values()) if (e.kind === 'player') n++;

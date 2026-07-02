@@ -139,7 +139,7 @@
     <div class="skinRow" id="skinRow"></div>
     <button id="playBtn">SPIELEN</button>
     <div id="loginErr"></div>
-    <div class="hint">WASD/Pfeile: Laufen (auch diagonal!) &nbsp;•&nbsp; Klick: Angreifen / Reden / Hinlaufen<br>1–5: Zauber &nbsp;•&nbsp; 6/7: Tränke &nbsp;•&nbsp; Q/E: Kamera &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; L: Quests &nbsp;•&nbsp; Enter: Chat</div>
+    <div class="hint">WASD: Laufen (diagonal!) &nbsp;•&nbsp; Klick: Angreifen / Reden / Looten &nbsp;•&nbsp; 1–7: Zauber &nbsp;•&nbsp; 8/9: Tränke<br>M: Weltkarte &nbsp;•&nbsp; R: Reiten &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; L: Quests &nbsp;•&nbsp; Q/E: Kamera &nbsp;•&nbsp; Zauber tippen im Chat: „exura"!</div>
   </div>
 </div>
 
@@ -150,6 +150,7 @@
     <div class="bar"><div class="fill" id="hpFill"></div><div class="txt" id="hpTxt"></div></div>
     <div class="bar"><div class="fill" id="mpFill"></div><div class="txt" id="mpTxt"></div></div>
     <div class="bar"><div class="fill" id="xpFill"></div><div class="txt" id="xpTxt"></div></div>
+    <div id="foodTxt" style="font-size:11px;margin-top:2px"></div>
     <div id="buffBar" style="font-size:11px;color:#e8c165;min-height:0"></div>
     <div id="petBar" style="display:none">
       <div style="font-size:11px;color:#8fd18a;margin-top:3px" id="petName"></div>
@@ -180,7 +181,7 @@
     <div id="chatLog" class="panel"></div>
     <input id="chatInput" maxlength="200" placeholder="Enter drücken zum Chatten…">
   </div>
-  <div id="helpLine">I: Inventar • L: Questlog • Q/E: Kamera drehen • ESC: Ziel abwählen</div>
+  <div id="helpLine">M: Karte • R: Reiten • I: Inventar • L: Questlog • Q/E: Kamera • K: Sound • ESC: Abwählen</div>
 
   <div id="invBox" class="panel"></div>
 
@@ -197,6 +198,14 @@
     <div id="dlgText" style="font-size:13px;line-height:1.5;color:#d8cdb8;min-height:52px;font-style:italic"></div>
     <div id="dlgTopics" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
     <div id="dlgQuests"></div>
+  </div>
+</div>
+
+<div id="bigMap" style="position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(5,5,10,0.75)">
+  <div class="panel" style="padding:14px;position:relative">
+    <span class="x" id="bigMapClose" style="position:absolute;top:6px;right:12px;cursor:pointer;color:#a89878;font-size:20px">✕</span>
+    <h3 style="margin:0 0 8px;color:var(--gold);text-align:center">🗺 Weltkarte <small style="color:#a89878;font-weight:normal">(klicken zum Reisen)</small></h3>
+    <canvas id="bigMapCanvas" width="768" height="768" style="border-radius:6px;border:1px solid #000;max-height:75vh;max-width:75vh;cursor:crosshair;image-rendering:pixelated"></canvas>
   </div>
 </div>
 

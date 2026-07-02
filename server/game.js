@@ -1,31 +1,35 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Spiellogik (v5)
-// Autoritativer Server: Bewegung, Kampf (Nah + Fern), Monster-KI,
-// Zauber pro Beruf, Buffs, Tiere des Bestienzüchters, Loot,
-// Ausrüstung (5 Slots), Level-System, Speicherung.
+// Kiria Online 3D – Spiellogik (v7)
+// PvP (außerhalb der Städte), Zauber per Chat, Support-Zauber
+// (Tempo/Licht), Leichen-Loot per Klick, Essen/Hunger, Mounts,
+// Tier-Stall des Bestienzüchters, Berufs-Ausrüstung.
 // ---------------------------------------------------------------
 const fs = require('fs');
 const path = require('path');
 const {
-  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS, xpForLevel, petXpForLevel,
+  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS,
+  MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, xpForLevel, petXpForLevel,
 } = require('./constants');
 const { generateWorld, isWalkable } = require('./world');
 
 const TICK_MS = 150;
 const BASE_ATK_MS = 2000;
-const MAP_VERSION = 3; // alte Speicherstände: Position zurücksetzen
+const MAP_VERSION = 4;
+const CORPSE_TTL = 90000;
+const STABLE_MAX = 6;
 
 const world = generateWorld();
 
-const players = new Map();   // socketId -> Spieler
-const monsters = new Map();  // monsterId -> Monster
-const pets = new Map();      // petId -> Tier (Bestienzüchter)
-const occ = new Map();       // "x,y" -> Entity-ID (Tiere blockieren nicht)
+const players = new Map();
+const monsters = new Map();
+const pets = new Map();
+const corpses = new Map();
+const occ = new Map();
 let nextMonsterId = 1;
 let nextPetId = 1;
+let nextCorpseId = 1;
 let io = null;
 
-// pro Tick gesammelte Änderungen
 let dirtyMoves = new Map();
 let dirtyHp = new Map();
 let events = [];
@@ -41,7 +45,6 @@ function isFree(x, y, ignoreId) {
   return !o || o === ignoreId;
 }
 
-// Städte = Schutzzonen
 function inTown(x, y) {
   for (const t of world.towns) {
     if (Math.abs(x - t.cx) <= t.r && Math.abs(y - t.cy) <= t.r) return true;
@@ -69,7 +72,6 @@ function place(ent, x, y) {
   dirtyMoves.set(ent.id, [x, y]);
 }
 
-// Tiere blockieren keine Kacheln
 function placePet(pet, x, y) {
   pet.x = x; pet.y = y;
   dirtyMoves.set(pet.id, [x, y]);
@@ -86,7 +88,7 @@ function findFreeNear(cx, cy, rMax, rMin = 0, avoidTown = false) {
     const x = Math.round(cx + Math.cos(a) * r);
     const y = Math.round(cy + Math.sin(a) * r);
     if (!isFree(x, y)) continue;
-    if (!world.reachable[y * world.size + x]) continue; // keine Wald-/Fels-Taschen
+    if (!world.reachable[y * world.size + x]) continue;
     if (avoidTown && inTown(x, y)) continue;
     return { x, y };
   }
@@ -198,11 +200,47 @@ function givePetXp(pet, amount) {
   }
 }
 
+// Stall: aktives Tier deponieren
+function petStash(p) {
+  if (!p.pet) return info(p, 'Du hast kein aktives Tier.');
+  if (p.petStable.length >= STABLE_MAX) return info(p, `Dein Stall ist voll (max. ${STABLE_MAX}).`);
+  p.petStable.push({ type: p.pet.type, level: p.pet.level, xp: p.pet.xp });
+  info(p, `${p.pet.name} wurde im Stall deponiert.`);
+  removePet(p.pet);
+  dirtyPrivate.add(p.id);
+}
+
+// Stall: Tier einsetzen
+function petDeploy(p, index) {
+  const entry = p.petStable[index];
+  if (!entry) return;
+  if (p.pet) return info(p, 'Du hast schon ein aktives Tier. Deponiere es zuerst.');
+  p.petStable.splice(index, 1);
+  createPet(p, entry.type, entry.level, entry.xp);
+  info(p, `${MONSTERS[entry.type].name} (Stufe ${entry.level}) ist wieder an deiner Seite!`);
+  dirtyPrivate.add(p.id);
+}
+
+function petRelease(p, index) {
+  const entry = p.petStable[index];
+  if (!entry) return;
+  p.petStable.splice(index, 1);
+  info(p, `Du entlässt ${MONSTERS[entry.type].name} in die Freiheit.`);
+  dirtyPrivate.add(p.id);
+}
+
+function dismissPet(p) {
+  if (!p.pet) return;
+  info(p, `Du entlässt deinen ${p.pet.name} in die Freiheit.`);
+  removePet(p.pet);
+}
+
 // ---------------- Spieler ----------------
 function publicPlayer(p) {
   return {
     id: p.id, name: p.name, vocation: p.vocation, outfit: p.outfit,
     x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, level: p.level, dead: p.dead,
+    mounted: p.mounted,
   };
 }
 
@@ -211,14 +249,19 @@ function privatePlayer(p) {
   return {
     ...publicPlayer(p),
     mp: p.mp, maxMp: p.maxMp, xp: p.xp, xpNext: xpForLevel(p.level + 1),
-    gold: p.gold, speed: p.speed,
-    inv: p.inv, eq: p.eq, quests: p.quests,
+    gold: p.gold, speed: effectiveSpeed(p), food: Math.round(p.food),
+    inv: p.inv, eq: p.eq, quests: p.quests, mounts: p.mounts,
     atk: Math.round(meleeBase(p)), def: armorDef(p),
-    buffs: { atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now) },
+    buffs: {
+      atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now),
+      speed: Math.max(0, p.buffs.speed - now), light: Math.max(0, p.buffs.light - now),
+    },
+    torchLight: !!(p.eq.shield && ITEMS[p.eq.shield].light),
     pet: p.pet ? {
       type: p.pet.type, name: p.pet.name, level: p.pet.level,
       hp: p.pet.hp, maxHp: p.pet.maxHp, xp: p.pet.xp, xpNext: petXpForLevel(p.pet.level + 1),
     } : null,
+    petStable: p.petStable,
   };
 }
 
@@ -227,19 +270,22 @@ function recalcSpeed(p) {
   p.speed = Math.max(170, 300 - p.level * 2 - (boots && boots.speed ? boots.speed : 0));
 }
 
+function effectiveSpeed(p) {
+  let s = p.speed;
+  if (p.buffs.speed > Date.now()) s *= HASTE_SPEED;
+  if (p.mounted) s *= MOUNT_SPEED;
+  return Math.max(100, Math.round(s));
+}
+
 function createPlayer(socket, account) {
   const voc = VOCATIONS[account.vocation];
   let save = account.save;
-  // Alte Speicherstände (kleine Karte / altes Format) migrieren
   if (save && save.mapV !== MAP_VERSION) {
     save = { ...save, x: undefined, y: undefined };
   }
-  const spawn = findFreeNear(world.templeSpawn.x, world.templeSpawn.y, 4) || world.templeSpawn;
-  const eq = { weapon: null, armor: null, helmet: null, shield: null, boots: null };
-  if (save) {
-    if (save.eq) Object.assign(eq, save.eq);
-    else { eq.weapon = save.weapon || null; eq.armor = save.armor || null; }
-  }
+  const spawn = findFreeNear(world.templeSpawn.x, world.templeSpawn.y, 3) || world.templeSpawn;
+  const eq = { weapon: null, armor: null, legs: null, helmet: null, shield: null, boots: null };
+  if (save && save.eq) Object.assign(eq, save.eq);
   const p = {
     id: socket.id,
     accountKey: account.name.toLowerCase(),
@@ -251,10 +297,14 @@ function createPlayer(socket, account) {
     level: save ? save.level : 1,
     xp: save ? save.xp : 0,
     gold: save ? save.gold : 50,
-    inv: save ? save.inv : { potHp: 3, potMp: 2, items: [] },
+    food: save && save.food !== undefined ? save.food : 300,
+    inv: save ? save.inv : { potHp: 3, potMp: 2, items: ['bread', 'torch'] },
     eq,
     quests: save && save.quests ? save.quests : {},
-    buffs: { atk: 0, def: 0 },
+    mounts: save && save.mounts ? save.mounts : [],
+    mounted: null,
+    petStable: save && save.petStable ? save.petStable : [],
+    buffs: { atk: 0, def: 0, speed: 0, light: 0 },
     pet: null,
     targetId: null, dead: false,
     nextMoveAt: 0, lastAtk: 0, potCd: 0, spellCds: {}, lastChat: 0,
@@ -271,7 +321,6 @@ function createPlayer(socket, account) {
   }
   players.set(p.id, p);
   occ.set(key(p.x, p.y), p.id);
-  // Gespeichertes Tier wiederbeleben
   if (save && save.pet && account.vocation === 'tamer') {
     createPet(p, save.pet.type, save.pet.level, save.pet.xp || 0, true);
   }
@@ -281,8 +330,9 @@ function createPlayer(socket, account) {
 function saveData(p) {
   return {
     mapV: MAP_VERSION,
-    x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold,
+    x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold, food: p.food,
     hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq, quests: p.quests,
+    mounts: p.mounts, petStable: p.petStable,
     pet: p.pet ? { type: p.pet.type, level: p.pet.level, xp: p.pet.xp } : null,
   };
 }
@@ -292,6 +342,7 @@ function removePlayer(p) {
   if (p.pet) removePet(p.pet);
   players.delete(p.id);
   for (const m of monsters.values()) if (m.targetId === p.id) m.targetId = null;
+  for (const o of players.values()) if (o.targetId === p.id) o.targetId = null;
 }
 
 // ---------------- Kampfformeln ----------------
@@ -305,7 +356,7 @@ function meleeBase(p) {
 
 function armorDef(p) {
   let def = Math.floor(p.level * 0.3);
-  for (const slot of ['armor', 'helmet', 'shield', 'boots']) {
+  for (const slot of ['armor', 'legs', 'helmet', 'shield', 'boots']) {
     if (p.eq[slot]) def += ITEMS[p.eq[slot]].def || 0;
   }
   return def;
@@ -320,15 +371,11 @@ function spellDamage(p, base, perLvl) {
   return Math.max(1, Math.round((base + p.level * perLvl) * voc.spell * (0.85 + Math.random() * 0.3)));
 }
 
-function monsterHitPlayer(m, p) {
-  const def = MONSTERS[m.type];
-  applyMonsterDamage(p, def.dmg * (0.5 + Math.random() * 0.5), m);
-}
-
-function applyMonsterDamage(p, raw, m) {
-  let dmg = Math.max(1, Math.round(raw * (50 / (50 + armorDef(p)))));
-  if (p.buffs.def > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.6));
-  damagePlayer(p, dmg, m);
+// Roh-Schaden auf Spieler anwenden (Rüstung + Schutzzauber)
+function applyDamageToPlayer(target, raw, source) {
+  let dmg = Math.max(1, Math.round(raw * (50 / (50 + armorDef(target)))));
+  if (target.buffs.def > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.6));
+  damagePlayer(target, dmg, source);
 }
 
 // ---------------- Schaden / Tod / XP ----------------
@@ -341,17 +388,24 @@ function damagePlayer(p, dmg, source) {
   if (p.hp <= 0) {
     p.dead = true;
     p.targetId = null;
+    p.mounted = null;
+    events.push({ t: 'mount', id: p.id, mount: null });
     p.gold = Math.floor(p.gold * 0.75);
     events.push({ t: 'die', id: p.id });
     info(p, 'Du bist gestorben! Du verlierst 25% deines Goldes.');
+    // PvP-Tod im Chat verkünden
+    if (source && players.has(source.id)) {
+      io.emit('chat', { id: 'system', from: '⚔ Kiria', text: `☠ ${p.name} wurde von ${source.name} im Kampf besiegt!` });
+    }
     for (const m of monsters.values()) if (m.targetId === p.id) m.targetId = null;
+    for (const o of players.values()) if (o.targetId === p.id) o.targetId = null;
   }
 }
 
 function respawnPlayer(p) {
   if (!p.dead) return;
   const temple = nearestTemple(p.x, p.y);
-  const spawn = findFreeNear(temple.x, temple.y, 4) || temple;
+  const spawn = findFreeNear(temple.x, temple.y, 3) || temple;
   p.dead = false;
   p.hp = p.maxHp;
   p.mp = p.maxMp;
@@ -362,7 +416,6 @@ function respawnPlayer(p) {
   if (p.pet) placePet(p.pet, spawn.x, spawn.y);
 }
 
-// attacker = Spieler (für Beute/XP), aggroId = wen das Monster angreifen soll
 function damageMonster(m, dmg, attacker, kind, aggroId) {
   if (m.dead) return;
   m.hp = Math.max(0, m.hp - dmg);
@@ -372,6 +425,7 @@ function damageMonster(m, dmg, attacker, kind, aggroId) {
   if (m.hp <= 0) killMonster(m, attacker);
 }
 
+// Beute landet in einer Leiche – Spieler plündern per Klick
 function killMonster(m, killer) {
   const def = MONSTERS[m.type];
   m.dead = true;
@@ -380,40 +434,61 @@ function killMonster(m, killer) {
   removeFromMap(m);
   events.push({ t: 'die', id: m.id });
 
+  // Leiche mit Beute
+  const gold = randInt(def.gold[0], def.gold[1]);
+  const items = [];
+  for (const d of def.drops || []) {
+    if (Math.random() < d.p) items.push(d.item);
+  }
+  if (gold > 0 || items.length) {
+    const corpse = {
+      id: 'c' + (nextCorpseId++),
+      name: def.name, x: m.x, y: m.y, gold, items,
+      expires: Date.now() + CORPSE_TTL,
+    };
+    corpses.set(corpse.id, corpse);
+    events.push({ t: 'corpse', corpse: publicCorpse(corpse) });
+  }
+
   if (killer && players.has(killer.id)) {
-    const gold = randInt(def.gold[0], def.gold[1]);
-    killer.gold += gold;
-    const lootNames = [];
-    if (gold > 0) lootNames.push(gold + ' Gold');
-    for (const d of def.drops || []) {
-      if (Math.random() < d.p) {
-        const item = ITEMS[d.item];
-        if (item.kind === 'potion') {
-          if (d.item === 'hp_potion') killer.inv.potHp++;
-          else killer.inv.potMp++;
-        } else {
-          killer.inv.items.push(d.item);
-        }
-        lootNames.push(item.name);
-      }
-    }
-    if (lootNames.length) info(killer, `${def.name} erbeutet: ${lootNames.join(', ')}`);
     giveXp(killer, def.xp);
     if (killer.pet) givePetXp(killer.pet, def.xp);
-
-    // Quest-Fortschritt
     for (const [qid, state] of Object.entries(killer.quests)) {
       const q = QUESTS[qid];
       if (!q || state.s !== 'active' || q.target !== m.type || state.n >= q.count) continue;
       state.n++;
-      if (state.n >= q.count) {
-        info(killer, `📜 Quest „${q.name}" erfüllt! Kehre zum Questgeber zurück.`);
-      } else {
-        info(killer, `📜 ${q.name}: ${state.n}/${q.count}`);
-      }
+      if (state.n >= q.count) info(killer, `📜 Quest „${q.name}" erfüllt! Kehre zum Questgeber zurück.`);
+      else info(killer, `📜 ${q.name}: ${state.n}/${q.count}`);
     }
     dirtyPrivate.add(killer.id);
   }
+}
+
+function publicCorpse(c) {
+  return { id: c.id, name: c.name, x: c.x, y: c.y };
+}
+
+function lootCorpse(p, corpseId) {
+  if (p.dead) return;
+  const c = corpses.get(corpseId);
+  if (!c) return;
+  if (cheb(p, c) > 2) return info(p, 'Geh näher an die Beute heran.');
+  const lootNames = [];
+  if (c.gold > 0) { p.gold += c.gold; lootNames.push(c.gold + ' Gold'); }
+  for (const itemId of c.items) {
+    const item = ITEMS[itemId];
+    if (item.kind === 'potion') {
+      if (itemId === 'hp_potion') p.inv.potHp++;
+      else p.inv.potMp++;
+    } else {
+      p.inv.items.push(itemId);
+    }
+    lootNames.push(item.name);
+  }
+  corpses.delete(corpseId);
+  events.push({ t: 'corpseGone', id: corpseId });
+  info(p, lootNames.length ? `Du erbeutest: ${lootNames.join(', ')}` : 'Die Beute war leer.');
+  dirtyPrivate.add(p.id);
 }
 
 function giveXp(p, amount) {
@@ -438,7 +513,7 @@ function info(p, msg) {
   p.socket.emit('info', { msg });
 }
 
-// ---------------- Aktionen (vom Client) ----------------
+// ---------------- Aktionen ----------------
 function tryMove(p, dx, dy) {
   if (p.dead) return;
   if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
@@ -447,7 +522,6 @@ function tryMove(p, dx, dy) {
   if (now < p.nextMoveAt) return;
   const nx = p.x + dx, ny = p.y + dy;
   const diag = dx !== 0 && dy !== 0;
-  // Diagonal nicht durch blockierte Ecken schneiden
   if (diag && (!isWalkable(world, p.x + dx, p.y) || !isWalkable(world, p.x, p.y + dy))) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
@@ -456,22 +530,62 @@ function tryMove(p, dx, dy) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
   }
-  p.nextMoveAt = now + p.speed * (diag ? 1.45 : 1) * 0.85;
+  p.nextMoveAt = now + effectiveSpeed(p) * (diag ? 1.45 : 1) * 0.85;
   place(p, nx, ny);
 }
 
+// Ziel darf Monster ODER Spieler sein (PvP)
 function setTarget(p, id) {
   if (typeof id !== 'string' && id !== null) return;
-  p.targetId = id && monsters.has(id) ? id : null;
+  if (id === p.id) id = null;
+  p.targetId = id && (monsters.has(id) || players.has(id)) ? id : null;
 }
 
 function setOutfit(p, outfit) {
-  outfit = Math.abs(parseInt(outfit, 10) || 0) % 8;
+  outfit = Math.abs(parseInt(outfit, 10) || 0) % 12;
   p.outfit = outfit;
   const acc = accounts[p.accountKey];
   if (acc) acc.outfit = outfit;
   events.push({ t: 'outfit', id: p.id, outfit });
   dirtyPrivate.add(p.id);
+}
+
+function mountToggle(p, type) {
+  if (p.dead) return;
+  if (p.mounted) {
+    p.mounted = null;
+    events.push({ t: 'mount', id: p.id, mount: null });
+    dirtyPrivate.add(p.id);
+    return;
+  }
+  type = String(type || p.mounts[0] || '');
+  if (!p.mounts.includes(type)) return info(p, 'Dieses Mount besitzt du nicht.');
+  p.mounted = type;
+  events.push({ t: 'mount', id: p.id, mount: type });
+  info(p, `Du reitest jetzt auf deinem ${MONSTERS[type] ? MONSTERS[type].name : 'Pferd'}.`);
+  dirtyPrivate.add(p.id);
+}
+
+// Gegenstand benutzen: Essen essen / Sattel lernen
+function useItem(p, invIndex) {
+  if (p.dead) return;
+  const itemId = p.inv.items[invIndex];
+  if (!itemId) return;
+  const item = ITEMS[itemId];
+  if (item.kind === 'food') {
+    p.inv.items.splice(invIndex, 1);
+    p.food = Math.min(FOOD_MAX, p.food + item.food);
+    info(p, `Mmh, ${item.name}! (+${Math.floor(item.food / 60)} Min. satt)`);
+    dirtyPrivate.add(p.id);
+  } else if (item.kind === 'mount') {
+    if (p.mounts.includes(item.mount)) return info(p, 'Dieses Mount kennst du schon.');
+    p.inv.items.splice(invIndex, 1);
+    p.mounts.push(item.mount);
+    const name = MONSTERS[item.mount] ? MONSTERS[item.mount].name : 'Pferd';
+    info(p, `🐎 Du kannst jetzt ${name} reiten! (Taste R oder Inventar)`);
+    events.push({ t: 'fx', kind: 'tame', at: [p.x, p.y] });
+    dirtyPrivate.add(p.id);
+  }
 }
 
 function castSpell(p, spellId) {
@@ -493,10 +607,17 @@ function castSpell(p, spellId) {
 
   } else if (spell.kind === 'missile') {
     const m = monsters.get(p.targetId);
-    if (!m || m.dead) return info(p, 'Kein Ziel ausgewählt.');
-    if (cheb(p, m) > spell.range) return info(p, 'Ziel ist zu weit weg.');
-    events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [m.x, m.y] });
-    damageMonster(m, spellDamage(p, spell.base, spell.perLvl), p, 'fire');
+    const enemy = players.get(p.targetId);
+    if (m && !m.dead) {
+      if (cheb(p, m) > spell.range) return info(p, 'Ziel ist zu weit weg.');
+      events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [m.x, m.y] });
+      damageMonster(m, spellDamage(p, spell.base, spell.perLvl), p, 'fire');
+    } else if (enemy && !enemy.dead) {
+      if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (cheb(p, enemy) > spell.range) return info(p, 'Ziel ist zu weit weg.');
+      events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [enemy.x, enemy.y] });
+      applyDamageToPlayer(enemy, spellDamage(p, spell.base, spell.perLvl), p);
+    } else return info(p, 'Kein Ziel ausgewählt.');
 
   } else if (spell.kind === 'aoe1') {
     let hit = 0;
@@ -520,20 +641,25 @@ function castSpell(p, spellId) {
   } else if (spell.kind === 'buff') {
     p.buffs[spell.buff] = now + spell.dur;
     events.push({ t: 'fx', kind: 'buff', at: [p.x, p.y], style: spell.buff });
-    info(p, spell.buff === 'atk' ? '⚔ Dein Angriff ist verstärkt!' : '🛡 Du bist geschützt!');
+    const msgs = { atk: '⚔ Dein Angriff ist verstärkt!', def: '🛡 Du bist geschützt!', speed: '💨 Du fühlst dich schnell wie der Wind!' };
+    info(p, msgs[spell.buff] || 'Zauber gewirkt.');
+
+  } else if (spell.kind === 'light') {
+    p.buffs.light = now + spell.dur;
+    events.push({ t: 'light', id: p.id, dur: spell.dur });
+    info(p, '🔆 Licht umgibt dich.');
 
   } else if (spell.kind === 'tame') {
     const m = monsters.get(p.targetId);
     if (!m || m.dead) return info(p, 'Wähle zuerst ein Tier als Ziel.');
     const def = MONSTERS[m.type];
     if (!def.tame) return info(p, `${def.name} kann nicht gezähmt werden.`);
-    if (p.pet) return info(p, 'Du hast schon ein Tier. Entlasse es zuerst (Inventar).');
+    if (p.pet) return info(p, 'Du hast schon ein aktives Tier. Deponiere es im Stall (Inventar).');
     if (cheb(p, m) > spell.range) return info(p, 'Geh näher heran.');
     const hpPct = m.hp / m.maxHp;
     if (hpPct > 0.6) return info(p, 'Das Tier ist noch zu stark – schwäche es unter 60% Leben!');
     const chance = 0.35 + 0.6 * ((0.6 - hpPct) / 0.6);
     if (Math.random() < chance) {
-      // Monster verschwindet, Tier entsteht
       m.dead = true;
       m.targetId = null;
       m.respawnAt = now + 30000 + Math.random() * 20000;
@@ -567,12 +693,6 @@ function castSpell(p, spellId) {
   dirtyPrivate.add(p.id);
 }
 
-function dismissPet(p) {
-  if (!p.pet) return;
-  info(p, `Du entlässt deinen ${p.pet.name} in die Freiheit.`);
-  removePet(p.pet);
-}
-
 function usePotion(p, kind) {
   if (p.dead) return;
   const now = Date.now();
@@ -594,14 +714,21 @@ function usePotion(p, kind) {
   dirtyPrivate.add(p.id);
 }
 
-function nearMerchant(p) {
-  return world.npcs.some((n) => n.role === 'merchant' && cheb(p, n) <= 4);
+// Welche Waren kann der Spieler hier kaufen?
+function allowedShopItems(p) {
+  const set = new Set();
+  for (const n of world.npcs) {
+    if (n.role !== 'merchant' || cheb(p, n) > 4) continue;
+    for (const it of (n.shop || SHOP_ITEMS)) set.add(it);
+  }
+  return set;
 }
 
 function buyItem(p, itemId) {
   if (p.dead) return;
-  if (!SHOP_ITEMS.includes(itemId)) return;
-  if (!nearMerchant(p)) return info(p, 'Du bist zu weit vom Händler entfernt.');
+  const allowed = allowedShopItems(p);
+  if (allowed.size === 0) return info(p, 'Du bist zu weit vom Händler entfernt.');
+  if (!allowed.has(itemId)) return;
   const item = ITEMS[itemId];
   if (p.gold < item.price) return info(p, 'Nicht genug Gold.');
   p.gold -= item.price;
@@ -617,7 +744,7 @@ function buyItem(p, itemId) {
 
 function sellItem(p, invIndex) {
   if (p.dead) return;
-  if (!nearMerchant(p)) return info(p, 'Du bist zu weit vom Händler entfernt.');
+  if (allowedShopItems(p).size === 0) return info(p, 'Du bist zu weit vom Händler entfernt.');
   const itemId = p.inv.items[invIndex];
   if (!itemId) return;
   const price = Math.floor(ITEMS[itemId].price / 2);
@@ -633,6 +760,9 @@ function equipItem(p, invIndex) {
   if (!itemId) return;
   const item = ITEMS[itemId];
   if (!EQUIP_SLOTS.includes(item.kind)) return;
+  if (item.voc && !item.voc.includes(p.vocation)) {
+    return info(p, `${item.name} ist nichts für einen ${VOCATIONS[p.vocation].name}.`);
+  }
   p.inv.items.splice(invIndex, 1);
   if (p.eq[item.kind]) p.inv.items.push(p.eq[item.kind]);
   p.eq[item.kind] = itemId;
@@ -686,6 +816,10 @@ function questComplete(p, qid) {
   dirtyPrivate.add(p.id);
 }
 
+// ---------------- Chat (mit Zauberspruch-Erkennung) ----------------
+const WORDS_TO_SPELL = {};
+for (const [id, s] of Object.entries(SPELLS)) WORDS_TO_SPELL[s.words] = id;
+
 function chat(p, text) {
   if (typeof text !== 'string') return;
   text = text.trim().slice(0, 200);
@@ -694,6 +828,11 @@ function chat(p, text) {
   if (now - p.lastChat < 500) return;
   p.lastChat = now;
   io.emit('chat', { id: p.id, from: p.name, text });
+  // Zauberspruch gesprochen? (wie in Tibia)
+  const spellId = WORDS_TO_SPELL[text.toLowerCase()];
+  if (spellId && VOCATIONS[p.vocation].spells.includes(spellId)) {
+    castSpell(p, spellId);
+  }
 }
 
 // ---------------- Monster-KI ----------------
@@ -704,7 +843,6 @@ function getMonsterVictim(id) {
 function monsterAI(m, now) {
   const def = MONSTERS[m.type];
 
-  // Ziel prüfen (Spieler in Städten sind sicher)
   let target = m.targetId ? getMonsterVictim(m.targetId) : null;
   if (target && (target.dead || cheb(m, target) > def.aggro * 2 || inTown(target.x, target.y))) {
     m.targetId = null; target = null;
@@ -727,24 +865,23 @@ function monsterAI(m, now) {
   if (target) {
     const isPet = !!target.ownerId;
     const d = cheb(m, target);
-    // Fernangriff (Drache/Dämon)
     if (def.ranged && d > 1 && d <= def.ranged.range && now - m.lastRanged > def.ranged.ms) {
       m.lastRanged = now;
       events.push({ t: 'fx', kind: 'flam', from: [m.x, m.y], to: [target.x, target.y] });
       const raw = def.ranged.dmg * (0.6 + Math.random() * 0.4);
       if (isPet) damagePet(target, Math.max(1, Math.round(raw)), m);
-      else applyMonsterDamage(target, raw, m);
+      else applyDamageToPlayer(target, raw, m);
       return;
     }
     if (d <= 1) {
       if (now - m.lastAtk > def.atkMs) {
         m.lastAtk = now;
-        if (isPet) damagePet(target, Math.max(1, Math.round(def.dmg * (0.5 + Math.random() * 0.5))), m);
-        else monsterHitPlayer(m, target);
+        const raw = def.dmg * (0.5 + Math.random() * 0.5);
+        if (isPet) damagePet(target, Math.max(1, Math.round(raw)), m);
+        else applyDamageToPlayer(target, raw, m);
       }
       return;
     }
-    // Verfolgen (diagonal bevorzugt, wenn beide Achsen offen)
     if (now - m.lastMove > def.moveMs) {
       const dx = Math.sign(target.x - m.x), dy = Math.sign(target.y - m.y);
       const cand = [];
@@ -762,7 +899,6 @@ function monsterAI(m, now) {
     return;
   }
 
-  // Heimkehren
   const homeD = Math.hypot(m.x - m.home.x, m.y - m.home.y);
   if (homeD > (m.home.r || 8) + 6 && now - m.lastMove > def.moveMs) {
     const dx = Math.sign(m.home.x - m.x), dy = Math.sign(m.home.y - m.y);
@@ -771,7 +907,6 @@ function monsterAI(m, now) {
     return;
   }
 
-  // Herumstreunen
   if (now - m.lastMove > def.moveMs * 3 && Math.random() < 0.25) {
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     const [dx, dy] = dirs[randInt(0, 3)];
@@ -801,7 +936,7 @@ function petAI(pet, now) {
     if (now - pet.lastMove > 400) {
       const dx = Math.sign(tgt.x - pet.x), dy = Math.sign(tgt.y - pet.y);
       const cand = Math.abs(tgt.x - pet.x) >= Math.abs(tgt.y - pet.y)
-        ? [[dx, 0], [0, dy]] : [[0, dy], [dx, 0]];
+        ? [[dx, dy], [dx, 0], [0, dy]] : [[dx, dy], [0, dy], [dx, 0]];
       for (const [cx, cy] of cand) {
         if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy)) {
           pet.lastMove = now;
@@ -813,13 +948,11 @@ function petAI(pet, now) {
     return;
   }
 
-  // Dem Besitzer folgen
   const d = cheb(pet, owner);
   if (d > 12) { placePet(pet, owner.x, owner.y); return; }
   if (d > 2 && now - pet.lastMove > 350) {
     const dx = Math.sign(owner.x - pet.x), dy = Math.sign(owner.y - pet.y);
-    const cand = Math.abs(owner.x - pet.x) >= Math.abs(owner.y - pet.y)
-      ? [[dx, 0], [0, dy]] : [[0, dy], [dx, 0]];
+    const cand = [[dx, dy], [dx, 0], [0, dy]];
     for (const [cx, cy] of cand) {
       if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy)) {
         pet.lastMove = now;
@@ -830,22 +963,32 @@ function petAI(pet, now) {
   }
 }
 
-// ---------------- Auto-Angriff (Nah- und Fernkampf) ----------------
+// ---------------- Auto-Angriff (auch PvP) ----------------
 function playerAutoAttack(p, now) {
   if (p.dead || !p.targetId) return;
-  const m = monsters.get(p.targetId);
-  if (!m || m.dead) { p.targetId = null; return; }
   const voc = VOCATIONS[p.vocation];
-  const d = cheb(p, m);
-  if (d > voc.range) return;
-  if (now - p.lastAtk < BASE_ATK_MS) return;
-  p.lastAtk = now;
-  if (d > 1) {
-    events.push({ t: 'fx', kind: voc.atkFx, from: [p.x, p.y], to: [m.x, m.y] });
+  const m = monsters.get(p.targetId);
+  const enemy = players.get(p.targetId);
+
+  if (m && !m.dead) {
+    const d = cheb(p, m);
+    if (d > voc.range) return;
+    if (now - p.lastAtk < BASE_ATK_MS) return;
+    p.lastAtk = now;
+    events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [m.x, m.y] });
+    damageMonster(m, meleeDamage(p), p, 'melee');
+  } else if (enemy && !enemy.dead) {
+    // PvP: nur außerhalb der Städte
+    if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return;
+    const d = cheb(p, enemy);
+    if (d > voc.range) return;
+    if (now - p.lastAtk < BASE_ATK_MS) return;
+    p.lastAtk = now;
+    events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [enemy.x, enemy.y] });
+    applyDamageToPlayer(enemy, meleeDamage(p), p);
   } else {
-    events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [m.x, m.y] });
+    p.targetId = null;
   }
-  damageMonster(m, meleeDamage(p), p, 'melee');
 }
 
 // ---------------- Spieltakt ----------------
@@ -875,20 +1018,39 @@ function tick() {
   for (const pet of pets.values()) petAI(pet, now);
   for (const p of players.values()) playerAutoAttack(p, now);
 
-  // Regeneration alle 3 Sekunden
+  // Verfallene Leichen entfernen
+  if (tickCount % 10 === 0) {
+    for (const c of corpses.values()) {
+      if (now > c.expires) {
+        corpses.delete(c.id);
+        events.push({ t: 'corpseGone', id: c.id });
+      }
+    }
+  }
+
+  // Regeneration + Hunger alle 3 Sekunden
   if (tickCount % 20 === 0) {
     for (const p of players.values()) {
       if (p.dead) continue;
       let changed = false;
+      const hadFood = p.food > 0;
+      p.food = Math.max(0, p.food - 3);
+      if (hadFood !== (p.food > 0)) changed = true;
+      const mult = p.food > 0 ? 1 : 0.25; // hungrig = kaum Regeneration
       if (p.hp < p.maxHp) {
-        p.hp = Math.min(p.maxHp, p.hp + Math.round((3 + p.level * 0.5) * (p.vocation === 'knight' ? 1.6 : 1)));
+        p.hp = Math.min(p.maxHp, p.hp + Math.round((3 + p.level * 0.5) * (p.vocation === 'knight' ? 1.6 : 1) * mult));
         dirtyHp.set(p.id, [p.hp, p.maxHp]);
         changed = true;
       }
       if (p.mp < p.maxMp) {
-        p.mp = Math.min(p.maxMp, p.mp + Math.round((4 + p.level * 0.8) * (p.vocation === 'sorcerer' ? 1.5 : 1)));
+        p.mp = Math.min(p.maxMp, p.mp + Math.round((4 + p.level * 0.8) * (p.vocation === 'sorcerer' ? 1.5 : 1) * mult));
         changed = true;
       }
+      // Ablaufende Buffs an den Client melden
+      for (const b of ['atk', 'def', 'speed', 'light']) {
+        if (p.buffs[b] && p.buffs[b] <= now) { p.buffs[b] = 0; changed = true; }
+      }
+      if (tickCount % 100 === 0) changed = true; // Hunger-Anzeige aktuell halten
       if (changed) dirtyPrivate.add(p.id);
     }
     for (const pet of pets.values()) {
@@ -949,9 +1111,10 @@ function start(ioServer) {
 }
 
 module.exports = {
-  world, players, monsters, pets, accounts,
+  world, players, monsters, pets, corpses, accounts,
   start, saveAccounts, createPlayer, removePlayer, respawnPlayer,
-  publicPlayer, privatePlayer, publicMonster, publicPet, saveData,
+  publicPlayer, privatePlayer, publicMonster, publicPet, publicCorpse, saveData,
   tryMove, setTarget, setOutfit, castSpell, usePotion, buyItem, sellItem,
-  equipItem, unequipItem, dismissPet, chat, questAccept, questComplete,
+  equipItem, unequipItem, useItem, lootCorpse, mountToggle,
+  dismissPet, petStash, petDeploy, petRelease, chat, questAccept, questComplete,
 };

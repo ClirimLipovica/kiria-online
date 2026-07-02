@@ -74,12 +74,14 @@ io.on('connection', (socket) => {
           npcs: w.npcs,
           towns: w.towns,
           fountains: w.fountains,
+          farm: w.farm,
         },
         defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS },
         you: game.privatePlayer(player),
         players: [...game.players.values()].filter((p) => p.id !== player.id).map(game.publicPlayer),
         monsters: [...game.monsters.values()].filter((m) => !m.dead).map(game.publicMonster),
         pets: [...game.pets.values()].map(game.publicPet),
+        corpses: [...game.corpses.values()].map(game.publicCorpse),
       });
       socket.broadcast.emit('playerJoined', game.publicPlayer(player));
       io.emit('chat', { id: 'system', from: '⚔ Kiria', text: `${player.name} hat die Welt betreten. (${io.engine.clientsCount} online)` });
@@ -100,6 +102,12 @@ io.on('connection', (socket) => {
   socket.on('unequip', (d) => { if (player && d) game.unequipItem(player, String(d.slot)); });
   socket.on('outfit', (d) => { if (player && d) game.setOutfit(player, d.outfit); });
   socket.on('dismissPet', () => { if (player) game.dismissPet(player); });
+  socket.on('petStash', () => { if (player) game.petStash(player); });
+  socket.on('petDeploy', (d) => { if (player && d) game.petDeploy(player, parseInt(d.index, 10)); });
+  socket.on('petRelease', (d) => { if (player && d) game.petRelease(player, parseInt(d.index, 10)); });
+  socket.on('use', (d) => { if (player && d) game.useItem(player, parseInt(d.index, 10)); });
+  socket.on('loot', (d) => { if (player && d) game.lootCorpse(player, String(d.id)); });
+  socket.on('mountToggle', (d) => { if (player) game.mountToggle(player, d ? d.type : null); });
   socket.on('questAccept', (d) => { if (player && d) game.questAccept(player, String(d.id)); });
   socket.on('questComplete', (d) => { if (player && d) game.questComplete(player, String(d.id)); });
   socket.on('say', (d) => { if (player && d) game.chat(player, d.text); });

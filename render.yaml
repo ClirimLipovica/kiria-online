@@ -1,0 +1,10 @@
+# Render.com Blueprint – ein Klick-Deploy für Kiria Online
+# Auf render.com: New → Blueprint → dieses Repository wählen
+services:
+  - type: web
+    name: kiria-online
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
