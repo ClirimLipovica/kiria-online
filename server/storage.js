@@ -12,8 +12,11 @@ const DATA_DIR = path.join(__dirname, 'data');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 const KEY = 'kiria_accounts';
 
-const URL = process.env.UPSTASH_REDIS_REST_URL;
-const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+// Werte säubern: Anführungszeichen, Leerzeichen und End-Slash entfernen
+// (passiert leicht beim Kopieren aus der Upstash-Konsole)
+const clean = (v) => String(v || '').trim().replace(/^["']+|["']+$/g, '').trim().replace(/\/+$/, '');
+const URL = clean(process.env.UPSTASH_REDIS_REST_URL);
+const TOKEN = clean(process.env.UPSTASH_REDIS_REST_TOKEN);
 const cloud = !!(URL && TOKEN);
 
 async function load() {
