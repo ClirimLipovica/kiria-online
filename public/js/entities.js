@@ -188,7 +188,7 @@ function makeHumanoid(opts) {
 }
 
 // ---------------- Vierbeiner (auch Hoftiere) ----------------
-function makeQuadruped({ color, scale = 1, tail = true, earColor = null, mane = null, hornsUp = false, patches = null, snoutColor = null }) {
+function makeQuadruped({ color, scale = 1, tail = true, earColor = null, mane = null, hornsUp = false, patches = null, snoutColor = null, tusks = false }) {
   const g = new THREE.Group();
   const anim = {};
   const body = box(0.3 * scale, 0.22 * scale, 0.55 * scale, color);
@@ -211,6 +211,13 @@ function makeQuadruped({ color, scale = 1, tail = true, earColor = null, mane = 
     const mn = box(0.08 * scale, 0.22 * scale, 0.3 * scale, mane);
     mn.position.set(0, 0.48 * scale, 0.12 * scale);
     g.add(mn);
+  }
+  if (tusks) {
+    const t1 = box(0.03 * scale, 0.08 * scale, 0.03 * scale, 0xf0e8d8);
+    t1.position.set(-0.07 * scale, 0.28 * scale, 0.44 * scale);
+    t1.rotation.x = -0.5;
+    const t2 = t1.clone(); t2.position.x = 0.07 * scale;
+    g.add(t1, t2);
   }
   if (hornsUp) {
     const h1 = box(0.04 * scale, 0.12 * scale, 0.04 * scale, 0xe8e0d0);
@@ -434,9 +441,34 @@ function makeWyrm() {
   return g;
 }
 
+// Fledermaus: kleiner Flatterer
+function makeBat() {
+  const g = new THREE.Group();
+  const anim = {};
+  const body = box(0.14, 0.14, 0.16, 0x3a3240);
+  body.position.y = 0.75;
+  const e1 = box(0.03, 0.06, 0.02, 0x3a3240);
+  e1.position.set(-0.04, 0.86, 0);
+  const e2 = e1.clone(); e2.position.x = 0.04;
+  const eye1 = box(0.025, 0.025, 0.02, 0xff4433);
+  eye1.position.set(-0.035, 0.78, 0.08);
+  const eye2 = eye1.clone(); eye2.position.x = 0.035;
+  g.add(body, e1, e2, eye1, eye2);
+  anim.lWing = limb(0.3, 0.03, 0.16, 0x2a2430, -0.08, 0.78, 0);
+  anim.lWing.children[0].position.set(-0.15, 0, 0);
+  anim.rWing = limb(0.3, 0.03, 0.16, 0x2a2430, 0.08, 0.78, 0);
+  anim.rWing.children[0].position.set(0.15, 0, 0);
+  g.add(anim.lWing, anim.rWing);
+  g.userData.anim = anim;
+  g.userData.animType = 'bat';
+  return g;
+}
+
 export function makeMonsterVisual(type) {
   switch (type) {
     case 'rat':      return makeQuadruped({ color: 0x8a8078, scale: 0.55, earColor: 0xc0a8a0 });
+    case 'bat':      return makeBat();
+    case 'boar':     return makeQuadruped({ color: 0x5a4430, scale: 0.9, earColor: 0x3a2c1e, snoutColor: 0xc09a8a, tusks: true });
     case 'crab':     return makeCrab();
     case 'snake':    return makeSnake();
     case 'spider':   return makeSpider();
@@ -448,6 +480,14 @@ export function makeMonsterVisual(type) {
     case 'scorpion': return makeScorpion();
     case 'orc':      return makeHumanoid({ skin: 0x5a8a3a, shirt: 0x4a3a28, legs: 0x33281c });
     case 'orc_berserker': return makeHumanoid({ skin: 0x5a8a3a, shirt: 0x8a2626, legs: 0x33281c, scale: 1.15, hat: 'helmet' });
+    case 'bandit':   return makeHumanoid({ skin: 0xc89a72, shirt: 0x6a3a2a, legs: 0x3a3028, hat: 'hood' });
+    case 'dark_elf': return makeHumanoid({ skin: 0x9a8ab0, shirt: 0x3a2a52, legs: 0x2a2040, hat: 'none', bowBack: true });
+    case 'lizardman': return makeHumanoid({ skin: 0x4a8a5a, shirt: 0x3a6a48, legs: 0x2a5038, snout: 0x3a7a4a, tail: true, hat: 'none' });
+    case 'harpy':    return makeHumanoid({ skin: 0xd8b088, shirt: 0x8a6a3a, legs: 0x6a5230, wings: true, earsUp: true, hat: 'none', scale: 0.95 });
+    case 'ogre':     return makeHumanoid({ skin: 0xb0885a, shirt: 0x6a5038, legs: 0x4a3828, scale: 1.5, bulky: true });
+    case 'yeti':     return makeHumanoid({ skin: 0xe8ecf0, shirt: 0xdce4ea, legs: 0xc8d4dc, scale: 1.6, bulky: true, hat: 'none' });
+    case 'dark_knight': return makeHumanoid({ skin: 0x8a8a92, shirt: 0x24262e, legs: 0x1a1c22, hat: 'helmet', shoulders: true, cape: true, capeColor: 0x5a1020, scale: 1.15 });
+    case 'lich':     return makeHumanoid({ skin: 0xb8c0b0, shirt: 0x2a2a3a, legs: 0x20202e, robe: true, staff: true, horns: true, hat: 'none', scale: 1.2 });
     case 'troll':    return makeHumanoid({ skin: 0x7a8a6a, shirt: 0x5a4a38, legs: 0x3a3028, scale: 1.3 });
     case 'skeleton': return makeHumanoid({ skin: 0xd8d8cc, shirt: 0xb8b8ac, legs: 0xa8a89c });
     case 'zombie':   return makeHumanoid({ skin: 0x84a06a, shirt: 0x4a4a38, legs: 0x3a3a30, armsForward: true, hat: 'none' });
@@ -567,6 +607,11 @@ function animateModel(visual, moving, swing, walkPhase, now) {
       l.rotation.x = moving ? Math.sin(walkPhase * 1.6 + i) * 0.35 : 0;
       l.rotation.z = l.userData.baseZ;
     });
+  } else if (type === 'bat') {
+    const flap = Math.sin(now * 0.02) * 0.9;
+    a.lWing.rotation.z = flap;
+    a.rWing.rotation.z = -flap;
+    visual.position.y = 0.2 + Math.sin(now * 0.004) * 0.12;
   } else if (type === 'snake') {
     visual.rotation.z = moving ? Math.sin(walkPhase * 1.5) * 0.12 : 0;
   } else if (type === 'ghost') {
@@ -599,6 +644,7 @@ export class Entity {
     this.mountG = null;
     this.lightUntil = 0;
     this.lightSprite = null;
+    this.pointLight = null;
 
     this.tx = data.x; this.ty = data.y;
     this.fx = data.x; this.fy = data.y;
@@ -784,6 +830,12 @@ export class Entity {
 
   setLight(durMs) {
     this.lightUntil = performance.now() + durMs;
+    // Echte Lichtquelle für Utevo Lux (hell und weit!)
+    if (!this.pointLight) {
+      this.pointLight = new THREE.PointLight(0xffd9a0, 0, 14, 1.4);
+      this.pointLight.position.y = 1.6;
+      this.group.add(this.pointLight);
+    }
   }
 
   faceToward(x, y) {
@@ -871,10 +923,12 @@ export class Entity {
       this.lightSprite.material.map.dispose();
       this.lightSprite.material.dispose();
       this.lightSprite = null;
+      if (this.pointLight) { this.group.remove(this.pointLight); this.pointLight = null; }
     }
     if (this.lightSprite) {
-      const s = 1.3 + Math.sin(now * 0.008) * 0.12;
+      const s = 1.6 + Math.sin(now * 0.008) * 0.15;
       this.lightSprite.scale.set(s, s, 1);
+      if (this.pointLight) this.pointLight.intensity = 2.2 + Math.sin(now * 0.01) * 0.3;
     }
 
     if (!moving && this.kind !== 'npc' && this.visual.userData.animType !== 'ghost') {

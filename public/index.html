@@ -139,7 +139,7 @@
     <div class="skinRow" id="skinRow"></div>
     <button id="playBtn">SPIELEN</button>
     <div id="loginErr"></div>
-    <div class="hint">WASD: Laufen (diagonal!) &nbsp;•&nbsp; Klick: Angreifen / Reden / Looten &nbsp;•&nbsp; 1–7: Zauber &nbsp;•&nbsp; 8/9: Tränke<br>M: Weltkarte &nbsp;•&nbsp; R: Reiten &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; L: Quests &nbsp;•&nbsp; Q/E: Kamera &nbsp;•&nbsp; Zauber tippen im Chat: „exura"!</div>
+    <div class="hint">WASD: Laufen &nbsp;•&nbsp; B: Kampfliste zum Anvisieren &nbsp;•&nbsp; Z: Zauberbuch &nbsp;•&nbsp; 1–7: Zauber &nbsp;•&nbsp; 8/9: Tränke<br>M: Weltkarte &nbsp;•&nbsp; Achtung: Monster jagen im Rudel – die Welt ist gefährlich geworden!</div>
   </div>
 </div>
 
@@ -175,13 +175,26 @@
     <div id="questList"></div>
   </div>
 
+  <div id="battleBox" class="panel" style="position:absolute;left:12px;top:210px;width:210px;padding:10px 12px;display:none;z-index:15;max-height:46vh;overflow-y:auto;scrollbar-width:thin">
+    <span class="x" id="battleClose" style="position:absolute;top:6px;right:10px;cursor:pointer;color:#a89878;font-size:16px">✕</span>
+    <h3 style="margin:0 0 6px;color:var(--gold);font-size:13px">⚔ Kampfliste (B)</h3>
+    <div id="battleList"></div>
+  </div>
+
+  <div id="spellBox" class="panel" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:420px;max-height:72vh;overflow-y:auto;padding:16px 20px;display:none;z-index:21;scrollbar-width:thin">
+    <span class="x" id="spellClose" style="position:absolute;top:8px;right:12px;cursor:pointer;color:#a89878;font-size:18px">✕</span>
+    <h3 style="margin:0 0 4px;color:var(--gold)">📖 Zauberbuch (Z)</h3>
+    <div style="font-size:10.5px;color:#a89878;margin-bottom:6px">Anklicken zum Wirken – oder den Spruch im Chat tippen! Die ersten 7 liegen auf den Tasten 1–7.</div>
+    <div id="spellList"></div>
+  </div>
+
   <div id="hotbar" class="panel"></div>
 
   <div id="chatBox">
     <div id="chatLog" class="panel"></div>
     <input id="chatInput" maxlength="200" placeholder="Enter drücken zum Chatten…">
   </div>
-  <div id="helpLine">M: Karte • R: Reiten • I: Inventar • L: Questlog • Q/E: Kamera • K: Sound • ESC: Abwählen</div>
+  <div id="helpLine">B: Kampfliste • Z: Zauberbuch • M: Karte • R: Reiten • I: Inventar • L: Quests • Q/E: Kamera • ESC: Abwählen</div>
 
   <div id="invBox" class="panel"></div>
 

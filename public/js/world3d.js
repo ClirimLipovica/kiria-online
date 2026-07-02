@@ -323,6 +323,21 @@ export class World3D {
       roof.castShadow = true;
       this.scene.add(roof);
       this.roofs.push({ roof, b });
+
+      // Wehende Fahne auf jedem Tempel
+      if (b.kind === 'temple') {
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.04, 0.04, 1.6, 5),
+          new THREE.MeshLambertMaterial({ color: 0x8a7a5a }),
+        );
+        pole.position.set(cx, gy + wallH + roofH + 0.7, cz);
+        const flagGeo = new THREE.PlaneGeometry(1.0, 0.55, 8, 1);
+        const flag = new THREE.Mesh(flagGeo, new THREE.MeshLambertMaterial({ color: 0xc8a030, side: THREE.DoubleSide }));
+        flag.position.set(cx + 0.52, gy + wallH + roofH + 1.2, cz);
+        this.scene.add(pole, flag);
+        if (!this.flagsList) this.flagsList = [];
+        this.flagsList.push({ flag, base: Float32Array.from(flagGeo.attributes.position.array) });
+      }
     }
   }
 
@@ -736,9 +751,10 @@ export class World3D {
       }
       fp.needsUpdate = true;
     }
-    // Fackel/Licht: mit ausgerüsteter Fackel oder Utevo Lux viel heller
-    this.torch.intensity = night * (this.playerLightBoost ? 3.2 : 1.2);
-    this.torch.distance = this.playerLightBoost ? 15 : 8;
+    // Fackel = hell, Utevo Lux = sehr hell und weit
+    const lb = this.playerLightBoost || 0;
+    this.torch.intensity = night * (lb === 2 ? 5 : lb === 1 ? 3 : 1.2);
+    this.torch.distance = lb === 2 ? 24 : lb === 1 ? 14 : 8;
     this.torch.position.set(center.x, center.y + 1.7, center.z);
 
     // Hoftiere, Katzen und Hunde
@@ -772,6 +788,18 @@ export class World3D {
     for (const f of this.flames) {
       const s = 0.45 + Math.sin(t * 11 + f.seed * 7) * 0.08 + Math.sin(t * 23 + f.seed) * 0.04;
       f.sp.scale.set(s, s * 1.25, 1);
+    }
+
+    // Tempel-Fahnen wehen im Wind
+    if (this.flagsList) {
+      for (const fl of this.flagsList) {
+        const pos = fl.flag.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const bx = fl.base[i * 3];
+          pos.array[i * 3 + 2] = Math.sin(t * 4 + (bx + 0.5) * 4) * 0.12 * (bx + 0.5);
+        }
+        pos.needsUpdate = true;
+      }
     }
 
     // Springbrunnen-Strahlen

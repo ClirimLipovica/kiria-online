@@ -10,7 +10,7 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
-const KEY = 'kiria_accounts';
+const KEY = 'kiria_accounts_v8'; // v8: kompletter Neustart der Spielstände
 
 // Werte säubern: Anführungszeichen, Leerzeichen und End-Slash entfernen
 // (passiert leicht beim Kopieren aus der Upstash-Konsole)

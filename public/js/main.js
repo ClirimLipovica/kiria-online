@@ -16,12 +16,14 @@ import * as ui from './ui.js';
 const socket = io();
 
 const MONSTER_MOVE_MS = {
-  rat: 650, crab: 700, snake: 700, spider: 480, wolf: 450, goblin: 500,
-  orc: 550, scorpion: 520, troll: 620, skeleton: 600, ghost: 480,
-  zombie: 780, hunter: 520, bear: 560, ghoul: 520, orc_berserker: 480,
-  banshee: 480, werewolf: 400, mummy: 650, giant_spider: 440,
-  minotaur: 520, cyclops: 620, vampire: 460, golem: 750,
-  fire_elemental: 520, wyrm: 500, dragon: 520, demon: 540,
+  bat: 420, rat: 600, crab: 700, snake: 650, boar: 520, spider: 460,
+  wolf: 430, goblin: 480, bandit: 480, scorpion: 500, orc: 520,
+  troll: 580, ghost: 450, skeleton: 560, zombie: 720, hunter: 480,
+  bear: 540, lizardman: 500, dark_elf: 460, ghoul: 500, harpy: 400,
+  orc_berserker: 460, banshee: 460, werewolf: 380, mummy: 620,
+  giant_spider: 420, minotaur: 500, ogre: 580, cyclops: 580,
+  vampire: 440, golem: 700, dark_knight: 480, yeti: 520,
+  fire_elemental: 500, wyrm: 480, dragon: 500, lich: 550, demon: 500,
 };
 
 const FX_COLORS = {
@@ -133,6 +135,7 @@ socket.on('welcome', (data) => {
     respawn: () => socket.emit('respawn'),
     questAccept: (id) => socket.emit('questAccept', { id }),
     questComplete: (id) => socket.emit('questComplete', { id }),
+    target: (id) => setTarget(id),
   }, you.vocation);
   ui.setYou(you);
   ui.initMinimapClick((tx, ty) => walkTowards(tx, ty));
@@ -242,8 +245,8 @@ socket.on('you', (y) => {
   ui.setYou(y);
   const e = self();
   if (e) e.setHp(y.hp, y.maxHp);
-  // Fackel oder Utevo Lux → helles Licht bei Nacht
-  if (world) world.playerLightBoost = !!(y.torchLight || (y.buffs && y.buffs.light > 0));
+  // Fackel = helles Licht, Utevo Lux = SEHR helles Licht
+  if (world) world.playerLightBoost = (y.buffs && y.buffs.light > 0) ? 2 : (y.torchLight ? 1 : 0);
   updateNpcMarks();
 });
 
@@ -457,6 +460,8 @@ function initInput() {
     if (k === 'enter') { ui.focusChat(); e.preventDefault(); return; }
     if (k === 'i') { ui.toggleInventory(); return; }
     if (k === 'l') { ui.toggleQuestLog(); return; }
+    if (k === 'b') { ui.toggleBattleList(); return; }
+    if (k === 'z') { ui.toggleSpellbook(); return; }
     if (k === 'm') { ui.toggleBigMap(self()); return; }
     if (k === 'r') { socket.emit('mountToggle', { type: you && you.mounted ? null : (you.mounts && you.mounts[0]) }); return; }
     if (k === 'k') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }
@@ -611,17 +616,12 @@ function processMovement(now) {
     }
   }
 
-  // Ziel automatisch verfolgen (Fernkämpfer bleiben auf Distanz)
+  // Ziel im Blick behalten – aber DU steuerst selbst, kein Auto-Hinlaufen!
   const t = targetId ? entities.get(targetId) : null;
   if (t && !t.dead) {
     const range = defs.VOCATIONS[you.vocation].range;
     const d = Math.max(Math.abs(me.tx - t.tx), Math.abs(me.ty - t.ty));
-    if (d <= range) { me.faceToward(t.tx, t.ty); pathQueue = []; }
-    else if (now - lastPathCalc > 450) {
-      lastPathCalc = now;
-      const p = findPath(me.tx, me.ty, t.tx, t.ty, true);
-      if (p && p.length > 1) pathQueue = p.slice(0, -1);
-    }
+    if (d <= range) me.faceToward(t.tx, t.ty);
   }
 
   if (pathQueue.length) {
@@ -670,6 +670,7 @@ function loop(now) {
       updateVisibility();
       world.updateRoofs(me.tx, me.ty);
       ui.updateMinimap(entities, selfId);
+      if (ui.isBattleListOpen()) ui.renderBattleList(entities, selfId, targetId);
       let n = 0;
       for (const e of entities.values()) if (e.kind === 'player') n++;
       ui.setOnlineCount(n);

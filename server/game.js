@@ -13,7 +13,7 @@ const { generateWorld, isWalkable } = require('./world');
 
 const TICK_MS = 150;
 const BASE_ATK_MS = 2000;
-const MAP_VERSION = 4;
+const MAP_VERSION = 5;
 const CORPSE_TTL = 90000;
 const STABLE_MAX = 6;
 
@@ -106,6 +106,7 @@ function spawnMonster(type, home, silent = false) {
     home, targetId: null,
     lastMove: 0, lastAtk: 0, lastRanged: 0,
     dead: false, respawnAt: 0,
+    damageBy: {},
   };
   monsters.set(m.id, m);
   occ.set(key(m.x, m.y), m.id);
@@ -266,6 +267,7 @@ function privatePlayer(p) {
     buffs: {
       atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now),
       speed: Math.max(0, p.buffs.speed - now), light: Math.max(0, p.buffs.light - now),
+      regen: Math.max(0, p.buffs.regen - now),
     },
     skullMs: Math.max(0, p.skullUntil - now),
     torchLight: !!(p.eq.shield && ITEMS[p.eq.shield].light),
@@ -316,7 +318,7 @@ function createPlayer(socket, account) {
     mounts: save && save.mounts ? save.mounts : [],
     mounted: null,
     petStable: save && save.petStable ? save.petStable : [],
-    buffs: { atk: 0, def: 0, speed: 0, light: 0 },
+    buffs: { atk: 0, def: 0, speed: 0, light: 0, regen: 0 },
     skullUntil: 0, skullMsgAt: 0,
     pet: null,
     targetId: null, dead: false,
@@ -435,6 +437,17 @@ function damageMonster(m, dmg, attacker, kind, aggroId) {
   dirtyHp.set(m.id, [m.hp, m.maxHp]);
   events.push({ t: 'dmg', id: m.id, amount: dmg, kind: kind || 'melee' });
   if (!m.targetId) m.targetId = aggroId || attacker.id;
+  // Schaden je Spieler merken (für faire XP-Teilung)
+  if (players.has(attacker.id)) {
+    m.damageBy[attacker.id] = (m.damageBy[attacker.id] || 0) + dmg;
+  }
+  // Rudel-Verhalten: Artgenossen in der Nähe eilen zu Hilfe!
+  if (MONSTERS[m.type].pack) {
+    for (const o of monsters.values()) {
+      if (o.dead || o.targetId || o.type !== m.type || o === m) continue;
+      if (cheb(o, m) <= 7) o.targetId = aggroId || attacker.id;
+    }
+  }
   if (m.hp <= 0) killMonster(m, attacker);
 }
 
@@ -463,18 +476,27 @@ function killMonster(m, killer) {
     events.push({ t: 'corpse', corpse: publicCorpse(corpse) });
   }
 
-  if (killer && players.has(killer.id)) {
-    giveXp(killer, def.xp);
-    if (killer.pet) givePetXp(killer.pet, def.xp);
-    for (const [qid, state] of Object.entries(killer.quests)) {
+  // XP fair nach verursachtem Schaden auf alle Beteiligten verteilen
+  const contributors = Object.entries(m.damageBy).filter(([id]) => players.has(id));
+  const totalDmg = contributors.reduce((a, [, d]) => a + d, 0);
+  const shares = totalDmg > 0
+    ? contributors.map(([id, d]) => [players.get(id), d / totalDmg])
+    : (killer && players.has(killer.id) ? [[killer, 1]] : []);
+
+  for (const [p, share] of shares) {
+    const xp = Math.max(1, Math.round(def.xp * share));
+    giveXp(p, xp);
+    if (p.pet) givePetXp(p.pet, xp);
+    for (const [qid, state] of Object.entries(p.quests)) {
       const q = QUESTS[qid];
       if (!q || state.s !== 'active' || q.target !== m.type || state.n >= q.count) continue;
       state.n++;
-      if (state.n >= q.count) info(killer, `📜 Quest „${q.name}" erfüllt! Kehre zum Questgeber zurück.`);
-      else info(killer, `📜 ${q.name}: ${state.n}/${q.count}`);
+      if (state.n >= q.count) info(p, `📜 Quest „${q.name}" erfüllt! Kehre zum Questgeber zurück.`);
+      else info(p, `📜 ${q.name}: ${state.n}/${q.count}`);
     }
-    dirtyPrivate.add(killer.id);
+    dirtyPrivate.add(p.id);
   }
+  m.damageBy = {};
 }
 
 function publicCorpse(c) {
@@ -651,15 +673,40 @@ function castSpell(p, spellId) {
       markSkull(p);
     } else return info(p, 'Kein Ziel ausgewählt.');
 
+  } else if (spell.kind === 'strike') {
+    // Wuchtiger Einzelschlag auf das aktuelle Ziel (Nahkampf)
+    const m = monsters.get(p.targetId);
+    const enemy = players.get(p.targetId);
+    const enemyPet = pets.get(p.targetId);
+    const dmg = Math.max(1, Math.round(meleeDamage(p) * spell.power));
+    if (m && !m.dead) {
+      if (cheb(p, m) > 1) return info(p, 'Geh näher heran.');
+      events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [m.x, m.y] });
+      damageMonster(m, dmg, p, 'melee');
+    } else if (enemy && !enemy.dead) {
+      if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (cheb(p, enemy) > 1) return info(p, 'Geh näher heran.');
+      events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [enemy.x, enemy.y] });
+      applyDamageToPlayer(enemy, dmg, p);
+      markSkull(p);
+    } else if (enemyPet && enemyPet.ownerId !== p.id) {
+      if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (cheb(p, enemyPet) > 1) return info(p, 'Geh näher heran.');
+      events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
+      damagePet(enemyPet, dmg, p);
+      markSkull(p);
+    } else return info(p, 'Kein Ziel ausgewählt.');
+
   } else if (spell.kind === 'aoe1') {
+    const radius = spell.radius || 1;
     let hit = 0;
     for (const m of monsters.values()) {
-      if (!m.dead && cheb(p, m) <= 1) {
+      if (!m.dead && cheb(p, m) <= radius) {
         damageMonster(m, Math.round(meleeDamage(p) * spell.power), p, 'melee');
         hit++;
       }
     }
-    events.push({ t: 'fx', kind: 'exori', at: [p.x, p.y] });
+    events.push({ t: 'fx', kind: radius > 1 ? 'nova' : 'exori', at: [p.x, p.y], radius });
     if (!hit) info(p, 'Kein Monster in Reichweite.');
 
   } else if (spell.kind === 'nova') {
@@ -673,7 +720,7 @@ function castSpell(p, spellId) {
   } else if (spell.kind === 'buff') {
     p.buffs[spell.buff] = now + spell.dur;
     events.push({ t: 'fx', kind: 'buff', at: [p.x, p.y], style: spell.buff });
-    const msgs = { atk: '⚔ Dein Angriff ist verstärkt!', def: '🛡 Du bist geschützt!', speed: '💨 Du fühlst dich schnell wie der Wind!' };
+    const msgs = { atk: '⚔ Dein Angriff ist verstärkt!', def: '🛡 Du bist geschützt!', speed: '💨 Du fühlst dich schnell wie der Wind!', regen: '💗 Heilende Kraft durchströmt dich!' };
     info(p, msgs[spell.buff] || 'Zauber gewirkt.');
 
   } else if (spell.kind === 'light') {
@@ -894,6 +941,21 @@ function monsterAI(m, now) {
     if (best) { m.targetId = best.id; target = best; }
   }
 
+  // Feiglinge fliehen bei wenig Leben
+  if (target && def.flee && m.hp < m.maxHp * 0.25) {
+    if (now - m.lastMove > def.moveMs) {
+      const dx = Math.sign(m.x - target.x), dy = Math.sign(m.y - target.y);
+      for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy], [-dy, dx]]) {
+        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy)) {
+          m.lastMove = now;
+          place(m, m.x + cx, m.y + cy);
+          break;
+        }
+      }
+    }
+    return;
+  }
+
   if (target) {
     const isPet = !!target.ownerId;
     const d = cheb(m, target);
@@ -904,6 +966,17 @@ function monsterAI(m, now) {
       if (isPet) damagePet(target, Math.max(1, Math.round(raw)), m);
       else applyDamageToPlayer(target, raw, m);
       return;
+    }
+    // Kluge Fernkämpfer halten Abstand
+    if (def.kite && d <= 2 && now - m.lastMove > def.moveMs) {
+      const dx = Math.sign(m.x - target.x), dy = Math.sign(m.y - target.y);
+      for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy], [-dy, dx]]) {
+        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy)) {
+          m.lastMove = now;
+          place(m, m.x + cx, m.y + cy);
+          return;
+        }
+      }
     }
     if (d <= 1) {
       if (now - m.lastAtk > def.atkMs) {
@@ -1068,6 +1141,7 @@ function tick() {
         const pos = findFreeNear(m.home.x, m.home.y, m.home.r, m.home.rMin || 0, true);
         if (pos) {
           m.dead = false; m.hp = def.hp;
+          m.damageBy = {};
           m.x = pos.x; m.y = pos.y;
           occ.set(key(m.x, m.y), m.id);
           events.push({ t: 'spawn', monster: publicMonster(m) });
@@ -1101,7 +1175,9 @@ function tick() {
       if (hadFood !== (p.food > 0)) changed = true;
       const mult = p.food > 0 ? 1 : 0.25; // hungrig = kaum Regeneration
       if (p.hp < p.maxHp) {
-        p.hp = Math.min(p.maxHp, p.hp + Math.round((3 + p.level * 0.5) * (p.vocation === 'knight' ? 1.6 : 1) * mult));
+        let heal = Math.round((3 + p.level * 0.5) * (p.vocation === 'knight' ? 1.6 : 1) * mult);
+        if (p.buffs.regen > now) heal += Math.round(6 + p.level * 1.2); // Utura
+        p.hp = Math.min(p.maxHp, p.hp + heal);
         dirtyHp.set(p.id, [p.hp, p.maxHp]);
         changed = true;
       }
@@ -1110,7 +1186,7 @@ function tick() {
         changed = true;
       }
       // Ablaufende Buffs an den Client melden
-      for (const b of ['atk', 'def', 'speed', 'light']) {
+      for (const b of ['atk', 'def', 'speed', 'light', 'regen']) {
         if (p.buffs[b] && p.buffs[b] <= now) { p.buffs[b] = 0; changed = true; }
       }
       // Totenkopf abgelaufen?

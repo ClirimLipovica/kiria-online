@@ -21,10 +21,10 @@ const TILE_MINI_COLORS = [
 
 const SPELL_ICONS = {
   exura: '💚', exura_gran: '💖', utani_hur: '💨', utevo_lux: '🔆',
-  exori: '🌪️', exori_gran: '⚔️', utito: '💢',
-  exori_san: '✨', exevo_san: '🌟', utamo: '🛡️',
-  exori_flam: '🔥', exori_vis: '⚡', exevo_gran: '💥', exevo_mas: '☄️',
-  utevo_bestia: '🐾', exura_bestia: '💗', utito_bestia: '🐺',
+  exori_ico: '🗡️', exori: '🌪️', exori_gran: '⚔️', exori_mas: '🌀', utito: '💢',
+  exori_san: '✨', exori_con: '🏹', exevo_san: '🌟', exevo_mas_san: '🌞', utamo: '🛡️', utura: '💞',
+  exori_flam: '🔥', exori_vis: '⚡', exori_frigo: '❄️', exevo_gran: '💥', exevo_mas: '☄️', exevo_ultra: '🌩️',
+  utevo_bestia: '🐾', exori_bestia: '🐻', exura_bestia: '💗', exori_natura: '🌿', utito_bestia: '🐺', exevo_natura: '🍃',
 };
 
 const SLOT_NAMES = { weapon: 'Waffe', armor: 'Rüstung', legs: 'Hose', helmet: 'Helm', shield: 'Hand', boots: 'Stiefel' };
@@ -67,6 +67,8 @@ export function initUI(gameDefs, h, vocation) {
   $('shopClose').addEventListener('click', closeShop);
   $('dlgClose').addEventListener('click', closeDialog);
   $('questClose').addEventListener('click', () => { $('questBox').style.display = 'none'; });
+  $('battleClose').addEventListener('click', () => { $('battleBox').style.display = 'none'; });
+  $('spellClose').addEventListener('click', () => { $('spellBox').style.display = 'none'; });
   $('respawnBtn').addEventListener('click', () => handlers.respawn());
 
   $('hud').style.display = 'block';
@@ -235,7 +237,8 @@ const slotEls = [];
 
 function buildHotbar(vocation) {
   HOTBAR = [];
-  const spells = defs.VOCATIONS[vocation].spells;
+  // Die ersten 7 Zauber auf der Hotbar – ALLE stehen im Zauberbuch (Taste Z)
+  const spells = defs.VOCATIONS[vocation].spells.slice(0, 7);
   spells.forEach((sp, i) => HOTBAR.push({ key: String(i + 1), spell: sp, ico: SPELL_ICONS[sp] || '✴️' }));
   HOTBAR.push({ key: '8', potion: 'hp', ico: '🧪', lbl: 'Heiltrank' });
   HOTBAR.push({ key: '9', potion: 'mp', ico: '🔷', lbl: 'Manatrank' });
@@ -576,6 +579,76 @@ export function openDialog(npc) {
 
 export function closeDialog() {
   $('dlgBox').style.display = 'none';
+}
+
+// ---------------- Kampfliste (Taste B, wie in Tibia) ----------------
+export function toggleBattleList() {
+  const b = $('battleBox');
+  b.style.display = b.style.display === 'block' ? 'none' : 'block';
+}
+
+export function isBattleListOpen() { return $('battleBox').style.display === 'block'; }
+
+export function renderBattleList(entities, selfId, currentTargetId) {
+  const list = $('battleList');
+  const self = entities.get(selfId);
+  if (!self) return;
+  const rows = [];
+  for (const e of entities.values()) {
+    if (e.id === selfId || e.dead || !e.group.visible) continue;
+    if (e.kind !== 'monster' && e.kind !== 'player' && e.kind !== 'pet') continue;
+    if (e.kind === 'pet' && e.ownerId === selfId) continue;
+    const d = Math.max(Math.abs(e.tx - self.tx), Math.abs(e.ty - self.ty));
+    if (d > 16) continue;
+    rows.push({ e, d });
+  }
+  rows.sort((a, b) => a.d - b.d);
+  list.innerHTML = '';
+  if (!rows.length) {
+    list.innerHTML = '<div style="color:#776a55;font-size:11px;padding:6px">Keine Gegner in der Nähe.</div>';
+    return;
+  }
+  for (const { e, d } of rows.slice(0, 14)) {
+    const div = document.createElement('div');
+    const isTarget = e.id === currentTargetId;
+    div.style.cssText = `display:flex;align-items:center;gap:6px;padding:4px 6px;margin:2px 0;border-radius:5px;cursor:pointer;background:${isTarget ? '#4a2018' : '#1d1712'};border:1px solid ${isTarget ? '#c8503a' : 'transparent'}`;
+    const color = e.kind === 'player' ? '#8fd18a' : e.kind === 'pet' ? '#7ee8e0' : '#e8b0a0';
+    const pct = Math.max(0, Math.min(100, (e.hp / e.maxHp) * 100));
+    div.innerHTML = `
+      <span style="flex:1;font-size:11px;color:${color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</span>
+      <span style="width:52px;height:7px;background:#201a14;border-radius:3px;overflow:hidden;flex-shrink:0"><span style="display:block;height:100%;width:${pct}%;background:${pct > 50 ? '#4caf50' : pct > 25 ? '#e8b53a' : '#d9453a'}"></span></span>
+      <span style="font-size:9px;color:#a89878;width:22px;text-align:right;flex-shrink:0">${d}m</span>`;
+    div.onclick = () => handlers.target(e.id);
+    list.appendChild(div);
+  }
+}
+
+// ---------------- Zauberbuch (Taste Z) ----------------
+export function toggleSpellbook() {
+  const b = $('spellBox');
+  b.style.display = b.style.display === 'block' ? 'none' : 'block';
+  renderSpellbook();
+}
+
+function renderSpellbook() {
+  const b = $('spellList');
+  if ($('spellBox').style.display !== 'block' || !you) return;
+  b.innerHTML = '';
+  for (const sid of defs.VOCATIONS[you.vocation].spells) {
+    const s = defs.SPELLS[sid];
+    const locked = you.level < s.lvl;
+    const div = document.createElement('div');
+    div.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 8px;margin:3px 0;border-radius:6px;background:#1d1712;cursor:${locked ? 'default' : 'pointer'};opacity:${locked ? 0.45 : 1}`;
+    div.innerHTML = `
+      <span style="font-size:18px">${SPELL_ICONS[sid] || '✴️'}</span>
+      <span style="flex:1">
+        <div style="font-size:12px;color:#e8c165;font-weight:bold">${s.name} <small style="color:#8a9a78;font-weight:normal">„${s.words}"</small></div>
+        <div style="font-size:10px;color:#a89878">${s.desc}</div>
+      </span>
+      <span style="font-size:10px;color:${locked ? '#c86a5a' : '#8a9a78'};text-align:right;flex-shrink:0">Lvl ${s.lvl}<br>${s.mana} MP</span>`;
+    if (!locked) div.onclick = () => { handlers.cast(sid); startCooldown(sid, s.cd); };
+    b.appendChild(div);
+  }
 }
 
 // ---------------- Todesbildschirm ----------------
