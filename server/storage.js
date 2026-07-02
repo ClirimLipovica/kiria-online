@@ -15,9 +15,17 @@ const KEY = 'kiria_accounts';
 // Werte säubern: Anführungszeichen, Leerzeichen und End-Slash entfernen
 // (passiert leicht beim Kopieren aus der Upstash-Konsole)
 const clean = (v) => String(v || '').trim().replace(/^["']+|["']+$/g, '').trim().replace(/\/+$/, '');
-const URL = clean(process.env.UPSTASH_REDIS_REST_URL);
-const TOKEN = clean(process.env.UPSTASH_REDIS_REST_TOKEN);
-const cloud = !!(URL && TOKEN);
+let URL = clean(process.env.UPSTASH_REDIS_REST_URL);
+let TOKEN = clean(process.env.UPSTASH_REDIS_REST_TOKEN);
+// Vertauschte Werte erkennen (URL muss mit http(s) beginnen)
+const isUrl = (v) => /^https?:\/\//i.test(v);
+if (URL && TOKEN && !isUrl(URL) && isUrl(TOKEN)) {
+  [URL, TOKEN] = [TOKEN, URL];
+  console.log('☁ Hinweis: URL und Token waren vertauscht – automatisch korrigiert.');
+}
+// Fehlendes https:// ergänzen, wenn es nach einer Upstash-Adresse aussieht
+if (URL && !isUrl(URL) && /upstash\.io$/i.test(URL)) URL = 'https://' + URL;
+const cloud = !!(URL && TOKEN && isUrl(URL));
 
 // Diagnose-Zustand (für /api/status – keine Geheimnisse!)
 const status = {
