@@ -14,7 +14,7 @@ let buffExpiry = { atk: 0, def: 0 };
 
 const TILE_MINI_COLORS = [
   '#1c4f7d', '#d8c07a', '#4d9040', '#2f6e2a', '#8d8d92',
-  '#a39a83', '#6b5b4a', '#ff5a10', '#7d5f3a', '#6f5a40',
+  '#a39a83', '#6b5b4a', '#ff5a10', '#7d5f3a', '#6f5a40', '#9aa8b8',
 ];
 
 const SPELL_ICONS = {
@@ -48,9 +48,36 @@ export function initUI(gameDefs, h, vocation) {
 
   $('shopClose').addEventListener('click', closeShop);
   $('dlgClose').addEventListener('click', closeDialog);
+  $('questClose').addEventListener('click', () => { $('questBox').style.display = 'none'; });
   $('respawnBtn').addEventListener('click', () => handlers.respawn());
 
   $('hud').style.display = 'block';
+}
+
+// ---------------- Quest-Helfer ----------------
+export function questState(qid) { return you && you.quests ? you.quests[qid] : undefined; }
+
+export function questAvailable(q, qid) {
+  if (!you || questState(qid)) return false;
+  if (you.level < q.lvl) return false;
+  if (q.prereq) {
+    const pre = questState(q.prereq);
+    if (!pre || pre.s !== 'done') return false;
+  }
+  return true;
+}
+
+// Für NPC-Markierungen: '!' = Quest verfügbar, '✓' = abschließbar
+export function npcQuestMark(npcId) {
+  if (!defs) return null;
+  let mark = null;
+  for (const [qid, q] of Object.entries(defs.QUESTS)) {
+    if (q.npc !== npcId) continue;
+    const st = questState(qid);
+    if (st && st.s === 'active' && st.n >= q.count) return '✓';
+    if (questAvailable(q, qid)) mark = '!';
+  }
+  return mark;
 }
 
 export function isTyping() { return document.activeElement === $('chatInput'); }
@@ -86,9 +113,61 @@ export function setYou(y) {
   renderInventory();
   if (shopOpen) renderShop();
   updateHotbarCounts();
+  renderTracker();
+  renderQuestLog();
 }
 
 export function getYou() { return you; }
+
+// ---------------- Quest-Verfolgung (unter der Minimap) ----------------
+function renderTracker() {
+  const el = $('questTracker');
+  const lines = [];
+  if (you && you.quests) {
+    for (const [qid, st] of Object.entries(you.quests)) {
+      const q = defs.QUESTS[qid];
+      if (!q || st.s !== 'active') continue;
+      const complete = st.n >= q.count;
+      lines.push(`<div style="color:${complete ? '#ffd700' : '#d8cdb8'}">${complete ? '✓' : '▸'} ${q.name}: ${st.n}/${q.count}</div>`);
+      if (lines.length >= 5) break;
+    }
+  }
+  el.style.display = lines.length ? 'block' : 'none';
+  el.innerHTML = lines.length ? `<div style="color:#e8c165;font-weight:bold;margin-bottom:2px">📜 Quests (L)</div>` + lines.join('') : '';
+}
+
+// ---------------- Questlog (Taste L) ----------------
+export function toggleQuestLog() {
+  const b = $('questBox');
+  b.style.display = b.style.display === 'block' ? 'none' : 'block';
+  renderQuestLog();
+}
+
+function renderQuestLog() {
+  const b = $('questBox');
+  if (b.style.display !== 'block' || !you) return;
+  const list = $('questList');
+  list.innerHTML = '';
+  let any = false;
+  for (const [qid, q] of Object.entries(defs.QUESTS)) {
+    const st = questState(qid);
+    if (!st) continue;
+    any = true;
+    const div = document.createElement('div');
+    div.style.cssText = 'padding:7px 9px;border-radius:6px;background:#1d1712;margin:5px 0;font-size:12px';
+    const status = st.s === 'done' ? '<span style="color:#8fd18a">✓ Abgeschlossen</span>'
+      : st.n >= q.count ? '<span style="color:#ffd700">★ Beim Questgeber abgeben!</span>'
+      : `<span style="color:#d8cdb8">${st.n} / ${q.count}</span>`;
+    const npcName = { npc_bruno: 'Wache Bruno (Kiria)', npc_lina: 'Lina (Porta)', npc_eira: 'Eira (Eichwald)', npc_grom: 'Grom (Steinfels)', npc_aldo: 'Priester Aldo (Kiria)', npc_mara: 'Mara (Porta)', npc_odo: 'Odo (Steinfels)', npc_alrik: 'Alrik (Eichwald)', npc_koenig: 'König Aldemar (Kiria)' }[q.npc] || q.npc;
+    const rewards = [`${q.reward.gold} Gold`, `${q.reward.xp} XP`];
+    if (q.reward.item) rewards.push(defs.ITEMS[q.reward.item].name);
+    div.innerHTML = `<div style="color:#e8c165;font-weight:bold">${q.name} ${status}</div>
+      <div style="color:#a89878;margin:3px 0">${q.desc}</div>
+      <div style="color:#8a9a78;font-size:11px">Questgeber: ${npcName} • Belohnung: ${rewards.join(', ')}</div>`;
+    list.appendChild(div);
+  }
+  if (!any) list.innerHTML = '<div style="color:#776a55;font-size:12px;padding:8px">Noch keine Quests. Sprich mit den Bewohnern der Städte — achte auf das gelbe „!"</div>';
+}
 
 // ---------------- Zielanzeige ----------------
 export function setTargetDisplay(m) {
@@ -359,6 +438,43 @@ export function openDialog(npc) {
     btn.style.cssText = 'font-size:12px;padding:5px 12px;cursor:pointer;background:#2a3a1a;border:1px solid #5a7a26;color:#c8e865;border-radius:5px';
     btn.onclick = () => { closeDialog(); openShop(npc.name); };
     box.appendChild(btn);
+  }
+
+  // Quests dieses NPCs
+  const qbox = $('dlgQuests');
+  qbox.innerHTML = '';
+  for (const [qid, q] of Object.entries(defs.QUESTS)) {
+    if (q.npc !== npc.id) continue;
+    const st = questState(qid);
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-top:8px;padding:7px 9px;border-radius:6px;background:#1d1712;font-size:12px';
+    const rewards = [`${q.reward.gold} Gold`, `${q.reward.xp} XP`];
+    if (q.reward.item) rewards.push(defs.ITEMS[q.reward.item].name);
+
+    if (st && st.s === 'done') {
+      continue; // erledigt, nicht mehr anzeigen
+    } else if (st && st.n >= q.count) {
+      row.innerHTML = `<div style="color:#ffd700;font-weight:bold">★ ${q.name} – erfüllt!</div>`;
+      const btn = document.createElement('button');
+      btn.textContent = `✓ Abgeben (${rewards.join(', ')})`;
+      btn.style.cssText = 'margin-top:5px;font-size:12px;padding:5px 12px;cursor:pointer;background:#3a3010;border:1px solid #c8a030;color:#ffd700;border-radius:5px';
+      btn.onclick = () => { handlers.questComplete(qid); closeDialog(); };
+      row.appendChild(btn);
+    } else if (st) {
+      row.innerHTML = `<div style="color:#d8cdb8">▸ ${q.name}: <b>${st.n} / ${q.count}</b></div><div style="color:#a89878;margin-top:2px">${q.desc}</div>`;
+    } else if (questAvailable(q, qid)) {
+      row.innerHTML = `<div style="color:#ffd700;font-weight:bold">! ${q.name}</div><div style="color:#a89878;margin:3px 0">${q.desc}</div><div style="color:#8a9a78;font-size:11px">Belohnung: ${rewards.join(', ')}</div>`;
+      const btn = document.createElement('button');
+      btn.textContent = '📜 Quest annehmen';
+      btn.style.cssText = 'margin-top:5px;font-size:12px;padding:5px 12px;cursor:pointer;background:#2a3a1a;border:1px solid #5a7a26;color:#c8e865;border-radius:5px';
+      btn.onclick = () => { handlers.questAccept(qid); closeDialog(); };
+      row.appendChild(btn);
+    } else if (you && you.level < q.lvl) {
+      row.innerHTML = `<div style="color:#776a55">🔒 ${q.name} (ab Level ${q.lvl})</div>`;
+    } else {
+      continue; // Voraussetzung fehlt
+    }
+    qbox.appendChild(row);
   }
 }
 

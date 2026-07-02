@@ -7,13 +7,13 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, xpForLevel, petXpForLevel,
+  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS, xpForLevel, petXpForLevel,
 } = require('./constants');
 const { generateWorld, isWalkable } = require('./world');
 
 const TICK_MS = 150;
 const BASE_ATK_MS = 2000;
-const MAP_VERSION = 2; // alte Speicherstände: Position zurücksetzen
+const MAP_VERSION = 3; // alte Speicherstände: Position zurücksetzen
 
 const world = generateWorld();
 
@@ -212,7 +212,7 @@ function privatePlayer(p) {
     ...publicPlayer(p),
     mp: p.mp, maxMp: p.maxMp, xp: p.xp, xpNext: xpForLevel(p.level + 1),
     gold: p.gold, speed: p.speed,
-    inv: p.inv, eq: p.eq,
+    inv: p.inv, eq: p.eq, quests: p.quests,
     atk: Math.round(meleeBase(p)), def: armorDef(p),
     buffs: { atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now) },
     pet: p.pet ? {
@@ -253,10 +253,11 @@ function createPlayer(socket, account) {
     gold: save ? save.gold : 50,
     inv: save ? save.inv : { potHp: 3, potMp: 2, items: [] },
     eq,
+    quests: save && save.quests ? save.quests : {},
     buffs: { atk: 0, def: 0 },
     pet: null,
     targetId: null, dead: false,
-    lastMove: 0, lastAtk: 0, potCd: 0, spellCds: {}, lastChat: 0,
+    nextMoveAt: 0, lastAtk: 0, potCd: 0, spellCds: {}, lastChat: 0,
     socket,
   };
   p.maxHp = voc.hp + voc.hpL * (p.level - 1);
@@ -281,7 +282,7 @@ function saveData(p) {
   return {
     mapV: MAP_VERSION,
     x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold,
-    hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq,
+    hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq, quests: p.quests,
     pet: p.pet ? { type: p.pet.type, level: p.pet.level, xp: p.pet.xp } : null,
   };
 }
@@ -399,6 +400,18 @@ function killMonster(m, killer) {
     if (lootNames.length) info(killer, `${def.name} erbeutet: ${lootNames.join(', ')}`);
     giveXp(killer, def.xp);
     if (killer.pet) givePetXp(killer.pet, def.xp);
+
+    // Quest-Fortschritt
+    for (const [qid, state] of Object.entries(killer.quests)) {
+      const q = QUESTS[qid];
+      if (!q || state.s !== 'active' || q.target !== m.type || state.n >= q.count) continue;
+      state.n++;
+      if (state.n >= q.count) {
+        info(killer, `📜 Quest „${q.name}" erfüllt! Kehre zum Questgeber zurück.`);
+      } else {
+        info(killer, `📜 ${q.name}: ${state.n}/${q.count}`);
+      }
+    }
     dirtyPrivate.add(killer.id);
   }
 }
@@ -429,15 +442,21 @@ function info(p, msg) {
 function tryMove(p, dx, dy) {
   if (p.dead) return;
   if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
-  if (Math.abs(dx) + Math.abs(dy) !== 1) return;
+  if (dx < -1 || dx > 1 || dy < -1 || dy > 1 || (dx === 0 && dy === 0)) return;
   const now = Date.now();
-  if (now - p.lastMove < p.speed * 0.85) return;
+  if (now < p.nextMoveAt) return;
   const nx = p.x + dx, ny = p.y + dy;
+  const diag = dx !== 0 && dy !== 0;
+  // Diagonal nicht durch blockierte Ecken schneiden
+  if (diag && (!isWalkable(world, p.x + dx, p.y) || !isWalkable(world, p.x, p.y + dy))) {
+    events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
+    return;
+  }
   if (!isFree(nx, ny, p.id)) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
   }
-  p.lastMove = now;
+  p.nextMoveAt = now + p.speed * (diag ? 1.45 : 1) * 0.85;
   place(p, nx, ny);
 }
 
@@ -631,6 +650,42 @@ function unequipItem(p, slot) {
   dirtyPrivate.add(p.id);
 }
 
+// ---------------- Quests ----------------
+function nearNpcById(p, npcId) {
+  const n = world.npcs.find((x) => x.id === npcId);
+  return n && cheb(p, n) <= 4;
+}
+
+function questAccept(p, qid) {
+  const q = QUESTS[qid];
+  if (!q || p.dead) return;
+  if (!nearNpcById(p, q.npc)) return info(p, 'Geh näher zum Questgeber.');
+  if (p.level < q.lvl) return info(p, `Dafür brauchst du Level ${q.lvl}.`);
+  if (q.prereq && (!p.quests[q.prereq] || p.quests[q.prereq].s !== 'done')) return info(p, 'Erledige zuerst die vorherige Aufgabe.');
+  if (p.quests[qid]) return;
+  p.quests[qid] = { n: 0, s: 'active' };
+  info(p, `📜 Quest angenommen: „${q.name}" – ${q.desc}`);
+  dirtyPrivate.add(p.id);
+}
+
+function questComplete(p, qid) {
+  const q = QUESTS[qid];
+  const state = p.quests[qid];
+  if (!q || !state || state.s !== 'active' || state.n < q.count || p.dead) return;
+  if (!nearNpcById(p, q.npc)) return info(p, 'Geh näher zum Questgeber.');
+  state.s = 'done';
+  p.gold += q.reward.gold;
+  const rewards = [`${q.reward.gold} Gold`];
+  if (q.reward.item) {
+    p.inv.items.push(q.reward.item);
+    rewards.push(ITEMS[q.reward.item].name);
+  }
+  info(p, `🏆 Quest „${q.name}" abgeschlossen! Belohnung: ${rewards.join(', ')}`);
+  events.push({ t: 'fx', kind: 'buff', at: [p.x, p.y], style: 'atk' });
+  giveXp(p, q.reward.xp);
+  dirtyPrivate.add(p.id);
+}
+
 function chat(p, text) {
   if (typeof text !== 'string') return;
   text = text.trim().slice(0, 200);
@@ -689,15 +744,16 @@ function monsterAI(m, now) {
       }
       return;
     }
-    // Verfolgen
+    // Verfolgen (diagonal bevorzugt, wenn beide Achsen offen)
     if (now - m.lastMove > def.moveMs) {
       const dx = Math.sign(target.x - m.x), dy = Math.sign(target.y - m.y);
-      const cand = Math.abs(target.x - m.x) >= Math.abs(target.y - m.y)
-        ? [[dx, 0], [0, dy], [0, -dy], [-dx, 0]]
-        : [[0, dy], [dx, 0], [-dx, 0], [0, -dy]];
+      const cand = [];
+      if (dx && dy && isWalkable(world, m.x + dx, m.y) && isWalkable(world, m.x, m.y + dy)) cand.push([dx, dy]);
+      if (Math.abs(target.x - m.x) >= Math.abs(target.y - m.y)) cand.push([dx, 0], [0, dy], [0, -dy], [-dx, 0]);
+      else cand.push([0, dy], [dx, 0], [-dx, 0], [0, -dy]);
       for (const [cx, cy] of cand) {
         if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy)) {
-          m.lastMove = now;
+          m.lastMove = now + (cx && cy ? def.moveMs * 0.45 : 0);
           place(m, m.x + cx, m.y + cy);
           break;
         }
@@ -897,5 +953,5 @@ module.exports = {
   start, saveAccounts, createPlayer, removePlayer, respawnPlayer,
   publicPlayer, privatePlayer, publicMonster, publicPet, saveData,
   tryMove, setTarget, setOutfit, castSpell, usePotion, buyItem, sellItem,
-  equipItem, unequipItem, dismissPet, chat,
+  equipItem, unequipItem, dismissPet, chat, questAccept, questComplete,
 };

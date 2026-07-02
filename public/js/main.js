@@ -1,9 +1,13 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Hauptmodul (v5)
-// Netzwerk, Rendering (mit Tone-Mapping), drehbare Kamera (Q/E),
-// Eingaben, Wegfindung, Tiere, NPC-Dialoge und die Spielschleife.
+// Kiria Online 3D – Hauptmodul (v6)
+// Netzwerk, Rendering mit Bloom, drehbare Kamera (Q/E),
+// 8-Richtungs-Steuerung (diagonal!), Wegfindung, Quests,
+// Tiere, NPC-Dialoge und die Spielschleife.
 // ---------------------------------------------------------------
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { World3D } from './world3d.js';
 import { Entity, OUTFITS } from './entities.js';
 import * as fx from './effects.js';
@@ -11,28 +15,29 @@ import * as ui from './ui.js';
 
 const socket = io();
 
-// Bewegungstempo der Monster (für flüssige Client-Animation)
 const MONSTER_MOVE_MS = {
   rat: 650, snake: 700, spider: 480, wolf: 450, orc: 550, troll: 620,
-  skeleton: 600, ghost: 480, bear: 560, cyclops: 620, dragon: 520, demon: 540,
+  skeleton: 600, ghost: 480, zombie: 780, hunter: 520, bear: 560,
+  ghoul: 520, orc_berserker: 480, banshee: 480, werewolf: 400,
+  minotaur: 520, cyclops: 620, wyrm: 500, dragon: 520, demon: 540,
 };
 
-// Farben der Kampf-Effekte
 const FX_COLORS = {
   flam: 0xff7722, vis: 0x88ccff, san: 0xffee88,
   zap: 0xbb77ff, leaf: 0x77cc44, spear: 0xcccccc,
 };
 
-let renderer, scene, camera, world;
+const VIEW_RADIUS = 42; // Entities weiter weg werden ausgeblendet
+
+let renderer, composer, scene, camera, world;
 let defs = null;
 let selfId = null;
 let you = null;
 const entities = new Map();
 const npcData = new Map();
 
-// Eingabe-Zustand
 const keys = new Set();
-let lastMoveAt = 0;
+let nextMoveAt = 0;
 let pathQueue = [];
 let lastPathCalc = 0;
 let targetId = null;
@@ -57,7 +62,6 @@ for (const el of document.querySelectorAll('.voc')) {
   });
 }
 
-// Skin-Farbauswahl
 const skinRow = $('skinRow');
 OUTFITS.forEach((color, i) => {
   const el = document.createElement('div');
@@ -105,6 +109,7 @@ socket.on('welcome', (data) => {
 
   initThree();
   world = new World3D(scene, data.world);
+  world.ensureChunks(you.x, you.y);
   fx.initEffects(scene);
   ui.initMinimap(world);
 
@@ -117,8 +122,10 @@ socket.on('welcome', (data) => {
     equip: (index) => socket.emit('equip', { index }),
     unequip: (slot) => socket.emit('unequip', { slot }),
     dismissPet: () => socket.emit('dismissPet'),
-    outfit: () => socket.emit('outfit', { outfit: ((you.outfit || 0) + 1) % 8 }),
+    outfit: () => socket.emit('outfit', { outfit: ((you.outfit || 0) + 1) % OUTFITS.length }),
     respawn: () => socket.emit('respawn'),
+    questAccept: (id) => socket.emit('questAccept', { id }),
+    questComplete: (id) => socket.emit('questComplete', { id }),
   }, you.vocation);
   ui.setYou(you);
 
@@ -130,13 +137,14 @@ socket.on('welcome', (data) => {
     npcData.set(n.id, n);
     addEntity({ ...n, hp: 1, maxHp: 1 }, 'npc');
   }
+  updateNpcMarks();
+  updateVisibility();
 
-  ui.chatMsg('⚔ Kiria', `Willkommen in Kiria, ${you.name}! Sprich mit den Stadtbewohnern (anklicken) und folge den Straßen.`, 'sys');
+  ui.chatMsg('⚔ Kiria', `Willkommen, ${you.name}! Sprich mit den Stadtbewohnern – das gelbe ! bedeutet: neue Quest!`, 'sys');
 
   initInput();
   requestAnimationFrame(loop);
 
-  // Debug-Zugriff (z. B. für Fehlersuche in der Konsole)
   window.KIRIA = { entities, npcData, camera, self: () => entities.get(selfId) };
 });
 
@@ -147,16 +155,22 @@ function initThree() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 1.2;
   $('app').appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 250);
 
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.55, 0.85);
+  composer.addPass(bloom);
+
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
   });
 }
 
@@ -189,6 +203,27 @@ function entityBlockedAt(x, y, ignoreId) {
 
 const self = () => entities.get(selfId);
 
+// Nur Figuren in Sichtweite rendern (wichtig bei 500+ Monstern)
+function updateVisibility() {
+  const me = self();
+  if (!me) return;
+  for (const e of entities.values()) {
+    if (e.id === selfId) { e.group.visible = true; continue; }
+    const d = Math.max(Math.abs(e.tx - me.tx), Math.abs(e.ty - me.ty));
+    e.group.visible = !e.dead && d <= VIEW_RADIUS;
+  }
+}
+
+// Quest-Markierungen (!/✓) über den NPCs aktualisieren
+function updateNpcMarks() {
+  for (const [id] of npcData) {
+    const e = entities.get(id);
+    if (!e) continue;
+    const mark = ui.npcQuestMark(id);
+    e.setMark(mark, mark === '✓' ? '#7ee87a' : '#ffd700');
+  }
+}
+
 // ================= NETZWERK-EREIGNISSE =================
 socket.on('playerJoined', (p) => addEntity(p, 'player'));
 socket.on('playerLeft', (d) => removeEntity(d.id));
@@ -198,6 +233,7 @@ socket.on('you', (y) => {
   ui.setYou(y);
   const e = self();
   if (e) e.setHp(y.hp, y.maxHp);
+  updateNpcMarks();
 });
 
 socket.on('chat', (d) => {
@@ -215,6 +251,7 @@ socket.on('chat', (d) => {
 socket.on('info', (d) => {
   ui.chatMsg('', d.msg, 'info');
   if (d.msg.includes('erbeutet')) fx.sfx.coin();
+  if (d.msg.includes('Quest')) fx.sfx.heal();
 });
 
 socket.on('tick', (data) => {
@@ -228,13 +265,11 @@ socket.on('tick', (data) => {
       e.walkTo(x, y, e.kind === 'monster' || e.kind === 'pet' ? e.moveMs : 300);
     }
   }
-
   for (const [id, hp, maxHp] of data.hp) {
     const e = entities.get(id);
     if (e) e.setHp(hp, maxHp);
     if (id === targetId && e) ui.setTargetDisplay(e);
   }
-
   for (const ev of data.ev) handleEvent(ev);
 });
 
@@ -243,14 +278,14 @@ function handleEvent(ev) {
 
   switch (ev.t) {
     case 'dmg': {
-      if (!e) break;
+      if (!e || !e.group.visible) break;
       const color = ev.kind === 'fire' ? '#ff9922' : ev.id === selfId ? '#ff4433' : '#ffdd44';
       fx.floatText('-' + ev.amount, e.group.position, color);
       if (ev.id === selfId) fx.sfx.hurt();
       break;
     }
     case 'heal': {
-      if (!e || !ev.amount) break;
+      if (!e || !ev.amount || !e.group.visible) break;
       fx.floatText('+' + ev.amount, e.group.position, '#66ee66');
       fx.burst(e.group.position.clone(), 0x55ee55, 12, 1.4);
       if (ev.id === selfId) fx.sfx.heal();
@@ -259,7 +294,7 @@ function handleEvent(ev) {
     case 'die': {
       if (!e) break;
       e.dead = true;
-      fx.burst(e.group.position.clone(), 0x882222, 18);
+      if (e.group.visible) fx.burst(e.group.position.clone(), 0x882222, 18);
       if (ev.id === selfId) {
         isDead = true;
         ui.showDeath(true);
@@ -267,7 +302,7 @@ function handleEvent(ev) {
         clearTarget();
         pathQueue = [];
       } else {
-        fx.sfx.hit();
+        if (e.group.visible) fx.sfx.hit();
         if (e.kind === 'monster' || e.kind === 'pet') {
           const dead = e;
           setTimeout(() => { if (entities.get(dead.id) === dead && dead.dead) removeEntity(dead.id); }, 700);
@@ -283,14 +318,8 @@ function handleEvent(ev) {
       if (e) { e.dead = false; e.group.visible = true; }
       break;
     }
-    case 'spawn': {
-      addEntity(ev.monster, 'monster');
-      break;
-    }
-    case 'pet': {
-      addEntity(ev.pet, 'pet');
-      break;
-    }
+    case 'spawn': addEntity(ev.monster, 'monster'); break;
+    case 'pet': addEntity(ev.pet, 'pet'); break;
     case 'outfit': {
       if (e) e.setOutfit(ev.outfit);
       if (ev.id === selfId && you) you.outfit = ev.outfit;
@@ -298,8 +327,10 @@ function handleEvent(ev) {
     }
     case 'levelup': {
       if (!e) break;
-      fx.ring(e.group.position.clone(), 0xffd700, 2.2, 700);
-      fx.burst(e.group.position.clone(), 0xffd700, 30, 2);
+      if (e.group.visible) {
+        fx.ring(e.group.position.clone(), 0xffd700, 2.2, 700);
+        fx.burst(e.group.position.clone(), 0xffd700, 30, 2);
+      }
       if (e.kind === 'pet') e.setLevel(ev.level);
       if (ev.id === selfId) fx.sfx.level();
       break;
@@ -310,16 +341,19 @@ function handleEvent(ev) {
       break;
     }
     case 'fx': {
+      const me = self();
+      const near = (p) => me && Math.max(Math.abs(p[0] - me.tx), Math.abs(p[1] - me.ty)) <= VIEW_RADIUS;
+      const anchor = ev.at || ev.from;
+      if (!near(anchor)) break;
       const v = (p) => new THREE.Vector3(p[0], world.groundY(p[0], p[1]) + 0.4, p[1]);
       const k = ev.kind;
-      if (k === 'flam' || k === 'vis' || k === 'san' || k === 'zap' || k === 'leaf' || k === 'spear') {
+      if (FX_COLORS[k] !== undefined) {
         fx.projectile(v(ev.from), v(ev.to), {
-          color: FX_COLORS[k] || 0xffffff,
+          color: FX_COLORS[k],
           size: k === 'spear' ? 0.09 : 0.16,
           dur: k === 'spear' ? 180 : 260,
         });
-        if (k === 'flam' || k === 'vis') fx.sfx.fire();
-        else fx.sfx.hit();
+        if (k === 'flam' || k === 'vis') fx.sfx.fire(); else fx.sfx.hit();
       } else if (k === 'slash') {
         fx.burst(v(ev.to), 0xffffff, 8, 1.6);
         fx.sfx.hit();
@@ -377,13 +411,14 @@ const KEYMAP = {
   d: [1, 0], arrowright: [1, 0],
 };
 
-// Bildschirmrichtung → Weltrichtung (abhängig vom Kamerawinkel)
-function remapDir(dx, dy) {
+// Bildschirmrichtung → Weltrichtung, gerundet auf 8 Richtungen
+function remapDir8(dx, dy) {
   const c = Math.cos(camYawTarget), s = Math.sin(camYawTarget);
   const wx = dx * c + dy * s;
   const wy = -dx * s + dy * c;
-  if (Math.abs(wx) >= Math.abs(wy)) return [Math.sign(wx) || 0, 0];
-  return [0, Math.sign(wy) || 0];
+  const a = Math.atan2(wy, wx);
+  const a8 = Math.round(a / (Math.PI / 4)) * (Math.PI / 4);
+  return [Math.round(Math.cos(a8)), Math.round(Math.sin(a8))];
 }
 
 function initInput() {
@@ -392,6 +427,7 @@ function initInput() {
     const k = e.key.toLowerCase();
     if (k === 'enter') { ui.focusChat(); e.preventDefault(); return; }
     if (k === 'i') { ui.toggleInventory(); return; }
+    if (k === 'l') { ui.toggleQuestLog(); return; }
     if (k === 'm') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }
     if (k === 'q') { camYawTarget += Math.PI / 4; return; }
     if (k === 'e') { camYawTarget -= Math.PI / 4; return; }
@@ -418,7 +454,7 @@ function initInput() {
       while (o && !o.userData.entityId && o.parent) o = o.parent;
       if (o && o.userData.entityId) {
         const ent = entities.get(o.userData.entityId);
-        if (!ent || ent.dead) continue;
+        if (!ent || ent.dead || !ent.group.visible) continue;
         if (ent.kind === 'monster') { setTarget(ent.id); return; }
         if (ent.kind === 'npc') {
           const me = self();
@@ -442,7 +478,9 @@ function initInput() {
   });
 }
 
-// ================= WEGFINDUNG (BFS) =================
+// ================= WEGFINDUNG (BFS, 8 Richtungen) =================
+const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
 function findPath(sx, sy, tx, ty, allowDest = false) {
   const S = world.size;
   if (tx < 0 || ty < 0 || tx >= S || ty >= S) return null;
@@ -460,16 +498,18 @@ function findPath(sx, sy, tx, ty, allowDest = false) {
   visited[sy * S + sx] = 1;
   let head = 0, found = false, expanded = 0;
 
-  while (head < qx.length && expanded < 20000) {
+  while (head < qx.length && expanded < 30000) {
     const x = qx[head], y = qy[head]; head++; expanded++;
     if (x === tx && y === ty) { found = true; break; }
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    for (const [dx, dy] of DIRS8) {
       const nx = x + dx, ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= S || ny >= S) continue;
       const ni = ny * S + nx;
       if (visited[ni]) continue;
       const isDest = nx === tx && ny === ty;
       if (!world.isWalkable(nx, ny) && !(isDest && allowDest)) continue;
+      // diagonal nicht durch blockierte Ecken
+      if (dx && dy && (!world.isWalkable(x + dx, y) || !world.isWalkable(x, y + dy))) continue;
       if (blocked.has(nx + ',' + ny) && !isDest) continue;
       visited[ni] = 1;
       parent[ni] = y * S + x;
@@ -499,12 +539,15 @@ function doStep(dx, dy, now) {
   const me = self();
   const nx = me.tx + dx, ny = me.ty + dy;
   me.faceToward(nx, ny);
+  const diag = dx !== 0 && dy !== 0;
+  if (diag && (!world.isWalkable(me.tx + dx, me.ty) || !world.isWalkable(me.tx, me.ty + dy))) return false;
   if (!world.isWalkable(nx, ny) || entityBlockedAt(nx, ny, selfId)) return false;
   socket.emit('move', { dx, dy });
-  me.walkTo(nx, ny, you.speed || 300);
+  const dur = (you.speed || 300);
+  me.walkTo(nx, ny, dur);
   predicted.push([nx, ny]);
   if (predicted.length > 5) predicted.shift();
-  lastMoveAt = now;
+  nextMoveAt = now + dur * (diag ? 1.45 : 1);
   fx.sfx.step();
   return true;
 }
@@ -512,15 +555,19 @@ function doStep(dx, dy, now) {
 function processMovement(now) {
   const me = self();
   if (!me || isDead || ui.isTyping()) return;
-  const speed = you.speed || 300;
-  if (now - lastMoveAt < speed) return;
+  if (now < nextMoveAt) return;
 
-  // Tastatur hat Vorrang (Richtung folgt der Kamera)
-  for (const k of keys) {
-    const d = KEYMAP[k];
-    if (d) {
-      const [dx, dy] = remapDir(d[0], d[1]);
-      doStep(dx, dy, now);
+  // Tastatur: gedrückte Richtungen kombinieren (diagonal möglich)
+  if (keys.size) {
+    let dx = 0, dy = 0;
+    for (const k of keys) {
+      const d = KEYMAP[k];
+      if (d) { dx += d[0]; dy += d[1]; }
+    }
+    dx = Math.sign(dx); dy = Math.sign(dy);
+    if (dx || dy) {
+      const [wx, wy] = remapDir8(dx, dy);
+      doStep(wx, wy, now);
       return;
     }
   }
@@ -538,11 +585,10 @@ function processMovement(now) {
     }
   }
 
-  // Weg abgehen
   if (pathQueue.length) {
     const [nx, ny] = pathQueue[0];
     const dx = nx - me.tx, dy = ny - me.ty;
-    if (Math.abs(dx) + Math.abs(dy) !== 1) { pathQueue = []; return; }
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1 || (!dx && !dy)) { pathQueue = []; return; }
     if (doStep(dx, dy, now)) pathQueue.shift();
     else {
       const dest = pathQueue[pathQueue.length - 1];
@@ -569,7 +615,6 @@ function loop(now) {
   if (me) {
     world.update(dt, me.group.position);
 
-    // Kamera (drehbar mit Q/E)
     camYaw += (camYawTarget - camYaw) * Math.min(1, dt * 6);
     const dist = 10 * zoom;
     camPos.set(
@@ -581,8 +626,9 @@ function loop(now) {
     camLook.copy(me.group.position).add(new THREE.Vector3(0, 0.6, 0));
     camera.lookAt(camLook);
 
-    if (now - lastMini > 200) {
+    if (now - lastMini > 250) {
       lastMini = now;
+      updateVisibility();
       ui.updateMinimap(entities, selfId);
       let n = 0;
       for (const e of entities.values()) if (e.kind === 'player') n++;
@@ -592,5 +638,5 @@ function loop(now) {
 
   fx.updateEffects(now, dt);
   ui.updateHotbar(now);
-  renderer.render(scene, camera);
+  composer.render();
 }

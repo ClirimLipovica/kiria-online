@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { Server } = require('socket.io');
 
-const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, MONSTERS, SHOP_ITEMS } = require('./constants');
+const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, MONSTERS, SHOP_ITEMS, QUESTS } = require('./constants');
 const game = require('./game');
 
 const app = express();
@@ -18,7 +18,8 @@ const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 1e6 });
 
 app.use(express.static(path.join(__dirname, '../public')));
-// three.js aus node_modules ausliefern
+// three.js aus node_modules ausliefern (Kern + Addons für Bloom)
+app.use('/vendor/jsm', express.static(path.join(__dirname, '../node_modules/three/examples/jsm')));
 app.use('/vendor', express.static(path.join(__dirname, '../node_modules/three/build')));
 
 const NAME_RE = /^[A-Za-z0-9ÄÖÜäöüß _-]{3,16}$/;
@@ -67,13 +68,14 @@ io.on('connection', (socket) => {
         id: player.id,
         world: {
           size: w.size,
-          tiles: Array.from(w.tiles),
-          heights: Array.from(w.heights),
+          tiles: Buffer.from(w.tiles),     // binär – spart Bandbreite
+          heights: Buffer.from(w.heights),
           buildings: w.buildings,
           npcs: w.npcs,
           towns: w.towns,
+          fountains: w.fountains,
         },
-        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS },
+        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS },
         you: game.privatePlayer(player),
         players: [...game.players.values()].filter((p) => p.id !== player.id).map(game.publicPlayer),
         monsters: [...game.monsters.values()].filter((m) => !m.dead).map(game.publicMonster),
@@ -98,6 +100,8 @@ io.on('connection', (socket) => {
   socket.on('unequip', (d) => { if (player && d) game.unequipItem(player, String(d.slot)); });
   socket.on('outfit', (d) => { if (player && d) game.setOutfit(player, d.outfit); });
   socket.on('dismissPet', () => { if (player) game.dismissPet(player); });
+  socket.on('questAccept', (d) => { if (player && d) game.questAccept(player, String(d.id)); });
+  socket.on('questComplete', (d) => { if (player && d) game.questComplete(player, String(d.id)); });
   socket.on('say', (d) => { if (player && d) game.chat(player, d.text); });
   socket.on('respawn', () => { if (player) game.respawnPlayer(player); });
 

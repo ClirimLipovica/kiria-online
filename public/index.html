@@ -139,7 +139,7 @@
     <div class="skinRow" id="skinRow"></div>
     <button id="playBtn">SPIELEN</button>
     <div id="loginErr"></div>
-    <div class="hint">WASD/Pfeile: Laufen &nbsp;•&nbsp; Klick auf Monster: Angreifen &nbsp;•&nbsp; Klick auf NPC: Reden<br>1–5: Zauber &nbsp;•&nbsp; 6/7: Tränke &nbsp;•&nbsp; Q/E: Kamera drehen &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; Enter: Chat &nbsp;•&nbsp; Mausrad: Zoom</div>
+    <div class="hint">WASD/Pfeile: Laufen (auch diagonal!) &nbsp;•&nbsp; Klick: Angreifen / Reden / Hinlaufen<br>1–5: Zauber &nbsp;•&nbsp; 6/7: Tränke &nbsp;•&nbsp; Q/E: Kamera &nbsp;•&nbsp; I: Inventar &nbsp;•&nbsp; L: Quests &nbsp;•&nbsp; Enter: Chat</div>
   </div>
 </div>
 
@@ -166,6 +166,13 @@
     <canvas id="minimap" width="168" height="168"></canvas>
     <div id="onlineCount"></div>
   </div>
+  <div id="questTracker" class="panel" style="position:absolute;top:230px;right:12px;width:184px;padding:8px 10px;font-size:11px;line-height:1.5;pointer-events:none;background:rgba(18,14,10,0.6)"></div>
+
+  <div id="questBox" class="panel" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;max-height:70vh;overflow-y:auto;padding:16px 20px;display:none;z-index:21;scrollbar-width:thin">
+    <span class="x" id="questClose" style="position:absolute;top:8px;right:12px;cursor:pointer;color:#a89878;font-size:18px">✕</span>
+    <h3 style="margin:0 0 6px;color:var(--gold)">📜 Questlog</h3>
+    <div id="questList"></div>
+  </div>
 
   <div id="hotbar" class="panel"></div>
 
@@ -173,7 +180,7 @@
     <div id="chatLog" class="panel"></div>
     <input id="chatInput" maxlength="200" placeholder="Enter drücken zum Chatten…">
   </div>
-  <div id="helpLine">I: Inventar • Klick auf Monster: Angriff • ESC: Ziel abwählen</div>
+  <div id="helpLine">I: Inventar • L: Questlog • Q/E: Kamera drehen • ESC: Ziel abwählen</div>
 
   <div id="invBox" class="panel"></div>
 
@@ -189,6 +196,7 @@
     <h3 id="dlgName" style="margin:0 0 8px;color:var(--gold)"></h3>
     <div id="dlgText" style="font-size:13px;line-height:1.5;color:#d8cdb8;min-height:52px;font-style:italic"></div>
     <div id="dlgTopics" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px"></div>
+    <div id="dlgQuests"></div>
   </div>
 </div>
 
@@ -201,7 +209,7 @@
 </div>
 
 <script type="importmap">
-  { "imports": { "three": "/vendor/three.module.js" } }
+  { "imports": { "three": "/vendor/three.module.js", "three/addons/": "/vendor/jsm/" } }
 </script>
 <script src="/socket.io/socket.io.js"></script>
 <script type="module" src="/js/main.js"></script>
