@@ -235,12 +235,49 @@ export function chatMsg(from, text, cls = '') {
 // ---------------- Hotbar (berufsabhängig) ----------------
 let HOTBAR = [];
 const slotEls = [];
+let myVocation = 'knight';
+let hotbarAssign = [];  // 7 Slots, je eine spellId (oder null)
+
+function hotbarKey() { return 'kiria_hotbar_' + myVocation; }
+
+function loadHotbarAssign() {
+  const spells = defs.VOCATIONS[myVocation].spells;
+  try {
+    const saved = JSON.parse(localStorage.getItem(hotbarKey()) || 'null');
+    if (Array.isArray(saved) && saved.length === 7) {
+      // nur gültige Zauber dieses Berufs übernehmen
+      hotbarAssign = saved.map((s) => (s && spells.includes(s) ? s : null));
+      return;
+    }
+  } catch { /* ignore */ }
+  // Standard: die ersten 7 Zauber des Berufs
+  hotbarAssign = spells.slice(0, 7).concat([null, null, null, null, null, null, null]).slice(0, 7);
+}
+
+function saveHotbarAssign() {
+  try { localStorage.setItem(hotbarKey(), JSON.stringify(hotbarAssign)); } catch { /* ignore */ }
+}
+
+// Zauber auf einen Slot (1–7) legen – tauscht/entfernt Duplikate
+export function assignSpellToSlot(spellId, slotIndex) {
+  if (slotIndex < 0 || slotIndex > 6) return;
+  const old = hotbarAssign.indexOf(spellId);
+  if (old >= 0) hotbarAssign[old] = hotbarAssign[slotIndex]; // tauschen
+  hotbarAssign[slotIndex] = spellId;
+  saveHotbarAssign();
+  buildHotbar(myVocation);
+  renderSpellbook();
+}
 
 function buildHotbar(vocation) {
+  if (vocation !== myVocation) hotbarAssign = []; // Beruf gewechselt → neu laden
+  myVocation = vocation;
+  if (!hotbarAssign.length) loadHotbarAssign();
   HOTBAR = [];
-  // Die ersten 7 Zauber auf der Hotbar – ALLE stehen im Zauberbuch (Taste Z)
-  const spells = defs.VOCATIONS[vocation].spells.slice(0, 7);
-  spells.forEach((sp, i) => HOTBAR.push({ key: String(i + 1), spell: sp, ico: SPELL_ICONS[sp] || '✴️' }));
+  for (let i = 0; i < 7; i++) {
+    const sp = hotbarAssign[i];
+    HOTBAR.push({ key: String(i + 1), spell: sp || null, ico: sp ? (SPELL_ICONS[sp] || '✴️') : '', slotIndex: i });
+  }
   HOTBAR.push({ key: '8', potion: 'hp', ico: '🧪', lbl: 'Heiltrank' });
   HOTBAR.push({ key: '9', potion: 'mp', ico: '🔷', lbl: 'Manatrank' });
 
@@ -250,12 +287,13 @@ function buildHotbar(vocation) {
   for (const s of HOTBAR) {
     const el = document.createElement('div');
     el.className = 'slot';
-    const name = s.spell ? defs.SPELLS[s.spell].name : s.lbl;
+    const name = s.spell ? defs.SPELLS[s.spell].name : (s.lbl || '– leer –');
     el.innerHTML = `<div class="key">${s.key}</div><div class="ico">${s.ico}</div><div class="lbl">${name}</div><div class="cd"></div><div class="cnt"></div>`;
     if (s.spell) {
       const sp = defs.SPELLS[s.spell];
-      el.title = `${sp.name} (Level ${sp.lvl}, ${sp.mana} Mana) – ${sp.desc}`;
-    } else el.title = name;
+      el.title = `${sp.name} (Level ${sp.lvl}, ${sp.mana} Mana) – ${sp.desc}\nTipp: Im Zauberbuch (Z) frei belegbar`;
+    } else if (s.potion) el.title = name;
+    else el.title = 'Leerer Slot – belege ihn im Zauberbuch (Taste Z)';
     el.addEventListener('click', () => activateSlot(s));
     bar.appendChild(el);
     slotEls.push({ el, def: s, cdUntil: 0 });
@@ -272,7 +310,7 @@ function activateSlot(s) {
     handlers.cast(s.spell);
     const spell = defs.SPELLS[s.spell];
     if (you && you.level >= spell.lvl && you.mp >= spell.mana) startCooldown(s.spell, spell.cd);
-  } else {
+  } else if (s.potion) {
     handlers.potion(s.potion);
   }
 }
@@ -648,16 +686,30 @@ function renderSpellbook() {
   for (const sid of defs.VOCATIONS[you.vocation].spells) {
     const s = defs.SPELLS[sid];
     const locked = you.level < s.lvl;
+    const onSlot = hotbarAssign.indexOf(sid); // -1 wenn auf keiner Taste
     const div = document.createElement('div');
-    div.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 8px;margin:3px 0;border-radius:6px;background:#1d1712;cursor:${locked ? 'default' : 'pointer'};opacity:${locked ? 0.45 : 1}`;
-    div.innerHTML = `
-      <span style="font-size:18px">${SPELL_ICONS[sid] || '✴️'}</span>
-      <span style="flex:1">
-        <div style="font-size:12px;color:#e8c165;font-weight:bold">${s.name} <small style="color:#8a9a78;font-weight:normal">„${s.words}"</small></div>
-        <div style="font-size:10px;color:#a89878">${s.desc}</div>
-      </span>
-      <span style="font-size:10px;color:${locked ? '#c86a5a' : '#8a9a78'};text-align:right;flex-shrink:0">Lvl ${s.lvl}<br>${s.mana} MP</span>`;
-    if (!locked) div.onclick = () => { handlers.cast(sid); startCooldown(sid, s.cd); };
+    div.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 8px;margin:3px 0;border-radius:6px;background:#1d1712;opacity:${locked ? 0.5 : 1}`;
+    const info = document.createElement('span');
+    info.style.cssText = `flex:1;cursor:${locked ? 'default' : 'pointer'}`;
+    info.innerHTML = `
+      <span style="font-size:16px;margin-right:5px">${SPELL_ICONS[sid] || '✴️'}</span>
+      <b style="font-size:12px;color:#e8c165">${s.name}</b> <small style="color:#8a9a78">„${s.words}" · Lvl ${s.lvl} · ${s.mana} MP</small>
+      <div style="font-size:10px;color:#a89878;margin-left:21px">${s.desc}${onSlot >= 0 ? ` <span style="color:#c8a030">• liegt auf Taste ${onSlot + 1}</span>` : ''}</div>`;
+    if (!locked) info.onclick = () => { handlers.cast(sid); startCooldown(sid, s.cd); };
+    div.appendChild(info);
+    // Belegungs-Buttons 1–7
+    const btns = document.createElement('span');
+    btns.style.cssText = 'display:flex;gap:2px;flex-shrink:0';
+    for (let i = 0; i < 7; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i + 1;
+      const active = onSlot === i;
+      btn.style.cssText = `width:19px;height:19px;padding:0;font-size:10px;cursor:pointer;border-radius:3px;border:1px solid ${active ? '#e8c165' : '#4a4030'};background:${active ? '#4a3a18' : '#2a241a'};color:${active ? '#ffd700' : '#a89878'}`;
+      btn.title = `„${s.name}" auf Taste ${i + 1} legen`;
+      btn.onclick = (ev) => { ev.stopPropagation(); assignSpellToSlot(sid, i); };
+      btns.appendChild(btn);
+    }
+    div.appendChild(btns);
     b.appendChild(div);
   }
 }
@@ -725,11 +777,12 @@ export function toggleBigMap(selfEntity, forceClose = false, entities = null) {
     ctx.fillStyle = '#e8c165';
     ctx.fillText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
   }
-  // Lebende Bosse (💀) einzeichnen
+  // Nur der Weltboss (Uralter Titan) wird auf der Karte gezeigt – die
+  // anderen Bosse muss man selbst finden (in ihren Höhlen).
   if (entities) {
     ctx.font = '18px serif';
     for (const e of entities.values()) {
-      if (!e.boss || e.dead) continue;
+      if (!e.worldBoss || e.dead) continue;
       ctx.fillText('💀', e.tx * bigMapScale, e.ty * bigMapScale + 6);
       ctx.font = 'bold 11px Verdana';
       ctx.lineWidth = 3;
@@ -795,11 +848,12 @@ export function updateMinimap(entities, selfId) {
     if (e.dead) continue;
     const px = (e.tx - sx) * scale, py = (e.ty - sy) * scale;
     if (px < 0 || py < 0 || px > cv.width || py > cv.height) continue;
-    if (e.boss) {
+    if (e.worldBoss) {
       ctx.fillStyle = '#ffd700';
       ctx.fillRect(px - 3, py - 3, 7, 7);
       continue;
     }
+    if (e.boss) continue; // normale Bosse nicht auf der Minimap zeigen
     ctx.fillStyle = e.id === selfId ? '#ffffff'
       : e.kind === 'player' ? '#4caf50'
       : e.kind === 'pet' ? '#4ae8e0'

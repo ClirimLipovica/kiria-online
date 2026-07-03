@@ -777,6 +777,7 @@ export class Entity {
       this.labelColor = data.boss ? '#ffd700' : '#ff8a7a';
     }
     this.boss = !!data.boss;
+    this.worldBoss = !!data.worldBoss;
     this.visual = visual;
     this.group.add(visual);
     this.labelY = this.boss ? 3.4 : TALL_TYPES.has(data.type) ? 2.2 : kind === 'corpse' ? 0.7 : 1.5;

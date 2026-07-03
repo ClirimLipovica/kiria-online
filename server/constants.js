@@ -98,15 +98,15 @@ const MONSTERS = {
   obsidian_golem: { name: 'Obsidiangolem', hp: 3700, dmg: 148, atkMs: 2400, moveMs: 650, xp: 920, gold: [200, 560], aggro: 8, drops: [{ item: 'royal_shield', p: 0.035 }, { item: 'diamond', p: 0.1 }, { item: 'emerald', p: 0.2 }, { item: 'titan_sword', p: 0.012 }] },
 
   // ---- BOSSE (Spezial-Spawnsystem, siehe game.js) ----
-  boss_spider_queen: { name: '👑 Spinnenkönigin', boss: true, hp: 9000, dmg: 150, atkMs: 1800, moveMs: 460, xp: 3200, gold: [800, 1600], aggro: 10, pack: true,
+  boss_spider_queen: { name: '👑 Spinnenkönigin', boss: true, guards: { type: 'giant_spider', count: 4 }, hp: 9000, dmg: 150, atkMs: 1800, moveMs: 460, xp: 3200, gold: [800, 1600], aggro: 10, pack: true,
     drops: [{ item: 'spider_silk', p: 1 }, { item: 'saddle_spider', p: 0.35 }, { item: 'ranger_armor', p: 0.3 }, { item: 'emerald', p: 0.5 }, { item: 'ruby', p: 0.3 }, { item: 'hawk_bow', p: 0.2 }] },
-  boss_orc_warlord: { name: '👑 Ork-Kriegsherr', boss: true, hp: 11000, dmg: 170, atkMs: 1900, moveMs: 480, xp: 4200, gold: [1000, 2200], aggro: 10, pack: true,
+  boss_orc_warlord: { name: '👑 Ork-Kriegsherr', boss: true, guards: { type: 'orc_berserker', count: 4 }, hp: 11000, dmg: 170, atkMs: 1900, moveMs: 480, xp: 4200, gold: [1000, 2200], aggro: 10, pack: true,
     drops: [{ item: 'battle_hammer', p: 0.35 }, { item: 'axe', p: 0.4 }, { item: 'chain', p: 0.4 }, { item: 'steel_helm', p: 0.3 }, { item: 'steel_shield', p: 0.3 }, { item: 'ruby', p: 0.3 }, { item: 'tusk', p: 1 }] },
-  boss_yeti_king: { name: '👑 Yeti-König', boss: true, hp: 14000, dmg: 195, atkMs: 2100, moveMs: 500, xp: 5600, gold: [1200, 2600], aggro: 10,
+  boss_yeti_king: { name: '👑 Yeti-König', boss: true, guards: { type: 'yeti', count: 4 }, hp: 14000, dmg: 195, atkMs: 2100, moveMs: 500, xp: 5600, gold: [1200, 2600], aggro: 10,
     drops: [{ item: 'frost_blade', p: 0.3 }, { item: 'frost_staff', p: 0.25 }, { item: 'frost_helm', p: 0.35 }, { item: 'frost_claws', p: 0.25 }, { item: 'diamond', p: 0.5 }, { item: 'bear_fur', p: 1 }] },
-  boss_lich_king: { name: '👑 Lichkönig', boss: true, hp: 16000, dmg: 205, atkMs: 2000, moveMs: 520, xp: 6800, gold: [1500, 3200], aggro: 10, kite: true, ranged: { dmg: 170, range: 6, ms: 2300 },
+  boss_lich_king: { name: '👑 Lichkönig', boss: true, guards: { type: 'dark_knight', count: 4 }, hp: 16000, dmg: 205, atkMs: 2000, moveMs: 520, xp: 6800, gold: [1500, 3200], aggro: 10, kite: true, ranged: { dmg: 170, range: 6, ms: 2300 },
     drops: [{ item: 'titan_staff', p: 0.2 }, { item: 'storm_staff', p: 0.4 }, { item: 'crown_helm', p: 0.35 }, { item: 'royal_legs', p: 0.3 }, { item: 'diamond', p: 0.5 }, { item: 'skull', p: 1 }] },
-  boss_dragon_lord: { name: '👑 Drachenfürst', boss: true, hp: 18000, dmg: 225, atkMs: 2000, moveMs: 480, xp: 8000, gold: [1800, 3800], aggro: 10, ranged: { dmg: 150, range: 5, ms: 2400 },
+  boss_dragon_lord: { name: '👑 Drachenfürst', boss: true, guards: { type: 'dragon', count: 3 }, hp: 18000, dmg: 225, atkMs: 2000, moveMs: 480, xp: 8000, gold: [1800, 3800], aggro: 10, ranged: { dmg: 150, range: 5, ms: 2400 },
     drops: [{ item: 'saddle_dragon', p: 0.5 }, { item: 'dragon_shield', p: 0.5 }, { item: 'dragon_helm', p: 0.5 }, { item: 'dragon_boots', p: 0.4 }, { item: 'dragon_scale', p: 1 }, { item: 'frost_blade', p: 0.25 }, { item: 'storm_bow', p: 0.25 }, { item: 'ruby', p: 0.6 }] },
   world_titan: { name: '💀 Uralter Titan', boss: true, worldBoss: true, hp: 40000, dmg: 280, atkMs: 2200, moveMs: 560, xp: 20000, gold: [5000, 9000], aggro: 12, ranged: { dmg: 200, range: 6, ms: 2600 },
     drops: [{ item: 'titan_heart', p: 1 }, { item: 'titan_sword', p: 0.35 }, { item: 'titan_staff', p: 0.35 }, { item: 'phoenix_bow', p: 0.35 }, { item: 'phoenix_claws', p: 0.35 }, { item: 'royal_plate', p: 0.3 }, { item: 'royal_shield', p: 0.3 }, { item: 'phoenix_boots', p: 0.3 }, { item: 'crown_helm', p: 0.4 }, { item: 'diamond', p: 1 }] },
@@ -365,6 +365,13 @@ const QUESTS = {
   q_dragon:   { name: 'Drachenjagd',           npc: 'npc_koenig',lvl: 36, target: 'dragon',    count: 3,  reward: { gold: 5200, xp: 9600, item: 'dragon_helm' }, desc: 'Die Drachen im Nordosten bedrohen das Reich. Der König ruft die Helden!' },
   q_lich:     { name: 'Der Totenbeschwörer',   npc: 'npc_sera',  lvl: 38, target: 'lich',      count: 2,  reward: { gold: 6500, xp: 12000 }, prereq: 'q_vampire', desc: 'Ein Lich beherrscht die Untoten der Krypta. Zerstöre den Meister, und die Toten ruhen.' },
   q_demon:    { name: 'Herz des Vulkans',      npc: 'npc_koenig',lvl: 40, target: 'demon',     count: 3,  reward: { gold: 9000, xp: 16000 }, prereq: 'q_dragon', desc: 'Aus dem Vulkan kriechen Dämonen. Beende den Albtraum – für Kiria!' },
+
+  // ---- BOSS-QUESTS: schalten die Boss-Höhle frei (Boss erscheint nur mit aktiver Quest) ----
+  bq_spider: { name: '👑 Die Spinnenkönigin', bossQuest: true, npc: 'npc_eira',   lvl: 15, target: 'boss_spider_queen', count: 1, reward: { gold: 3000,  xp: 4000, item: 'saddle_spider' }, desc: 'Tief in der Spinnenhöhle westlich von Eichwald thront die Spinnenkönigin mit ihren Wächtern. Nimm diese Quest an, dann erscheint sie – besiege sie!' },
+  bq_orc:    { name: '👑 Der Ork-Kriegsherr', bossQuest: true, npc: 'npc_bruno',  lvl: 20, target: 'boss_orc_warlord',  count: 1, reward: { gold: 4500,  xp: 6000 }, prereq: 'q_orcs', desc: 'In der Kriegshöhle unter der Ork-Festung schmiedet der Kriegsherr seine Pläne. Nur mit dieser Quest wagen sich seine Berserker hervor. Beende seinen Feldzug!' },
+  bq_yeti:   { name: '👑 Der Yeti-König', bossQuest: true, npc: 'npc_odo',    lvl: 26, target: 'boss_yeti_king',    count: 1, reward: { gold: 6000,  xp: 8500 }, desc: 'In der Eishöhle im hohen Norden herrscht der Yeti-König mit seiner Leibgarde. Stelle dich der Kälte – wenn du dich traust!' },
+  bq_lich:   { name: '👑 Der Lichkönig', bossQuest: true, npc: 'npc_sera',   lvl: 34, target: 'boss_lich_king',    count: 1, reward: { gold: 9000,  xp: 13000 }, prereq: 'q_lich', desc: 'In der Gruft tief in den Ruinen erhebt sich der Lichkönig, bewacht von dunklen Rittern. Zerschlage seine Herrschaft über die Toten!' },
+  bq_dragon: { name: '👑 Der Drachenfürst', bossQuest: true, npc: 'npc_koenig', lvl: 40, target: 'boss_dragon_lord',  count: 1, reward: { gold: 14000, xp: 20000, item: 'saddle_dragon' }, prereq: 'q_dragon', desc: 'Im Drachenhort im Nordosten thront der Drachenfürst mit seiner Brut. Nur die größten Helden kehren zurück – mit einem Drachen als Reittier!' },
 };
 
 const MOUNT_SPEED = 0.6;

@@ -79,6 +79,23 @@ export class World3D {
     this.tuftMat = new THREE.MeshLambertMaterial({ color: 0x3f8a34 });
     this.flowerGeo = new THREE.SphereGeometry(0.05, 5, 4);
     this.flowerMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    // Straßenlaternen (Pfahl + geteiltes Glüh-Sprite, das nachts leuchtet)
+    this.lanternPoleGeo = new THREE.CylinderGeometry(0.04, 0.05, 1.5, 5);
+    this.lanternPoleMat = new THREE.MeshLambertMaterial({ color: 0x2c2620 });
+    this.lanternGlowTex = (() => {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 48;
+      const g = cv.getContext('2d');
+      const rg = g.createRadialGradient(24, 24, 1, 24, 24, 22);
+      rg.addColorStop(0, 'rgba(255,240,190,1)');
+      rg.addColorStop(0.4, 'rgba(255,190,90,0.85)');
+      rg.addColorStop(1, 'rgba(255,150,40,0)');
+      g.fillStyle = rg; g.fillRect(0, 0, 48, 48);
+      return new THREE.CanvasTexture(cv);
+    })();
+    this.lanternGlowMat = new THREE.SpriteMaterial({
+      map: this.lanternGlowTex, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: 0.25,
+    });
 
     this._buildWater();
     this._buildBuildings();
@@ -102,32 +119,41 @@ export class World3D {
   isWalkable(x, y) { return WALKABLE.has(this.tileAt(x, y)); }
 
   // ================= CHUNKS =================
+  // Baut pro Aufruf höchstens EINEN neuen Chunk (den nächstgelegenen
+  // fehlenden). So verteilt sich die Last über viele Frames → kein Ruckeln.
   ensureChunks(px, py) {
     const ccx = Math.floor(px / CHUNK), ccy = Math.floor(py / CHUNK);
     const maxC = Math.ceil(this.size / CHUNK) - 1;
+    // Sichtbarkeit setzen + weit entfernte Chunks freigeben
     for (const [key, chunk] of this.chunks) {
       const d = Math.max(Math.abs(chunk.cx - ccx), Math.abs(chunk.cy - ccy));
       if (d > VIEW_CHUNKS) chunk.group.visible = false;
+      else chunk.group.visible = true;
       if (d > KEEP_CHUNKS) {
         this.scene.remove(chunk.group);
         chunk.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
         this.chunks.delete(key);
       }
     }
+    // Den nächstgelegenen noch fehlenden sichtbaren Chunk finden und NUR den bauen
+    let best = null, bestD = Infinity;
     for (let dy = -VIEW_CHUNKS; dy <= VIEW_CHUNKS; dy++) {
       for (let dx = -VIEW_CHUNKS; dx <= VIEW_CHUNKS; dx++) {
         const cx = ccx + dx, cy = ccy + dy;
         if (cx < 0 || cy < 0 || cx > maxC || cy > maxC) continue;
-        const key = cx + '_' + cy;
-        let chunk = this.chunks.get(key);
-        if (!chunk) {
-          chunk = this._buildChunk(cx, cy);
-          this.chunks.set(key, chunk);
-          this.scene.add(chunk.group);
-        }
-        chunk.group.visible = true;
+        if (this.chunks.has(cx + '_' + cy)) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = [cx, cy]; }
       }
     }
+    if (best) {
+      const [cx, cy] = best;
+      const chunk = this._buildChunk(cx, cy);
+      this.chunks.set(cx + '_' + cy, chunk);
+      this.scene.add(chunk.group);
+      return true; // es gibt evtl. noch mehr zu bauen
+    }
+    return false;
   }
 
   _buildChunk(cx, cy) {
@@ -138,7 +164,7 @@ export class World3D {
 
     const pos = [], col = [], idxArr = [];
     const lavaPos = [], lavaIdx = [];
-    const trees = [], rocks = [], graves = [], tufts = [], flowers = [], walls = [];
+    const trees = [], rocks = [], graves = [], tufts = [], flowers = [], walls = [], lanterns = [];
     const c = new THREE.Color();
     let v = 0, lv = 0;
 
@@ -184,6 +210,8 @@ export class World3D {
         } else if (t === TILE.TREE) trees.push([x, y]);
         else if (t === TILE.WALL) walls.push([x, y]);
         else if (t === TILE.ROCK && rand() < 0.3) rocks.push([x, y]);
+        // Laternen im Raster entlang der Straßen (alle 7 Kacheln)
+        if (t === TILE.ROAD && x % 7 === 0 && y % 7 === 0) lanterns.push([x, y]);
         else if (t === TILE.GRAVE) graves.push([x, y]);
         else if (t === TILE.GRASS) {
           const r = rand();
@@ -295,6 +323,18 @@ export class World3D {
         mesh.setColorAt(i, cc);
       });
       group.add(mesh);
+    }
+
+    // Straßenlaternen: Pfahl + Glüh-Sprite (teilen sich das Nacht-Material)
+    for (const [x, y] of lanterns) {
+      const gy = this.groundY(x, y);
+      const pole = new THREE.Mesh(this.lanternPoleGeo, this.lanternPoleMat);
+      pole.position.set(x, gy + 0.75, y);
+      pole.castShadow = true;
+      const glow = new THREE.Sprite(this.lanternGlowMat);
+      glow.position.set(x, gy + 1.55, y);
+      glow.scale.set(1.6, 1.6, 1);
+      group.add(pole, glow);
     }
 
     return { cx, cy, group };
@@ -825,11 +865,8 @@ export class World3D {
     this.time += dt;
     const t = this.time;
 
-    // Chunks nachladen (gedrosselt)
-    if (t - this._lastChunkAt > 0.4) {
-      this._lastChunkAt = t;
-      this.ensureChunks(Math.round(center.x), Math.round(center.z));
-    }
+    // Chunks nachladen: jeden Frame höchstens 1 neuer Chunk (kein Ruckeln)
+    this.ensureChunks(Math.round(center.x), Math.round(center.z));
 
     // Wasser folgt dem Spieler + Wellen
     this.water.position.x = center.x;
@@ -852,8 +889,9 @@ export class World3D {
     const dawn = Math.max(0, 1 - Math.abs(dayness - 0.15) * 6) * (dayness > 0.01 ? 1 : 0);
     const night = Math.max(0, 1 - dayness * 2.5);
 
-    this.sun.intensity = 0.15 + dayness * 1.75;
-    this.hemi.intensity = 0.32 + dayness * 0.8;
+    // Nacht deutlich heller (Mondlicht + blaues Ambiente), damit man gut sieht
+    this.sun.intensity = 0.5 + dayness * 1.45;
+    this.hemi.intensity = 0.72 + dayness * 0.6;
     const sky = this._skyNight.clone().lerp(this._skyDay, dayness);
     if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.45);
     const horizon = this._horNight.clone().lerp(this._horDay, dayness);
@@ -927,6 +965,9 @@ export class World3D {
       }
       fp.needsUpdate = true;
     }
+    // Straßenlaternen leuchten nachts (geteiltes Material)
+    this.lanternGlowMat.opacity = 0.12 + night * 0.85;
+
     // Fackel = hell, Utevo Lux = sehr hell und weit
     const lb = this.playerLightBoost || 0;
     this.torch.intensity = night * (lb === 2 ? 5 : lb === 1 ? 3 : 1.2);

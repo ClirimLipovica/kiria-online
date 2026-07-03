@@ -429,6 +429,34 @@ function generateWorld(seed = 20260702) {
 
   const templeSpawn = towns[0].temple;
 
+  // ---- Boss-Höhlen: umschlossene Höhlen mit Zufahrt zur nächsten Stadt ----
+  // Der Boss + seine Wachen erscheinen nur, wenn ein Spieler mit der
+  // passenden Quest die Höhle betritt (Logik in game.js).
+  const carveCave = (cx, cy, r) => {
+    for (let y = cy - r - 1; y <= cy + r + 1; y++) {
+      for (let x = cx - r - 1; x <= cx + r + 1; x++) {
+        if (!inB(x, y)) continue;
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < r - 0.5) { tiles[idx(x, y)] = TILE.FLOOR; heights[idx(x, y)] = 1; }
+        else if (d < r + 0.8) { tiles[idx(x, y)] = TILE.ROCK; heights[idx(x, y)] = 4; }
+      }
+    }
+  };
+  const bossCaves = [
+    { type: 'boss_spider_queen', quest: 'bq_spider', cx: 200,  cy: 462,  r: 7, sx: 300,  sy: 320, zone: 'in der Spinnenhöhle bei Eichwald' },
+    { type: 'boss_orc_warlord',  quest: 'bq_orc',    cx: 440,  cy: 1024, r: 7, sx: 440,  sy: 960, zone: 'in der Kriegshöhle bei der Ork-Festung' },
+    { type: 'boss_yeti_king',    quest: 'bq_yeti',   cx: 700,  cy: 58,   r: 7, sx: 700,  sy: 180, zone: 'in der Eishöhle im hohen Norden' },
+    { type: 'boss_lich_king',    quest: 'bq_lich',   cx: 965,  cy: 648,  r: 7, sx: 900,  sy: 690, zone: 'in der Gruft tief in den Ruinen' },
+    { type: 'boss_dragon_lord',  quest: 'bq_dragon', cx: 1090, cy: 92,   r: 7, sx: 1040, sy: 140, zone: 'im Drachenhort im Nordosten' },
+  ];
+  for (const bc of bossCaves) {
+    carveCave(bc.cx, bc.cy, bc.r);
+    roadV(Math.min(bc.cy, bc.sy), Math.max(bc.cy, bc.sy), bc.cx); // vertikaler Ast
+    roadH(Math.min(bc.cx, bc.sx), Math.max(bc.cx, bc.sx), bc.sy); // horizontaler Ast
+    // Höhlenmitte wieder als Boden (die Straße hat sie evtl. überschrieben)
+    tiles[idx(bc.cx, bc.cy)] = TILE.FLOOR; heights[idx(bc.cx, bc.cy)] = 1;
+  }
+
   // ---- Erreichbarkeits-Maske (VOR den Streu-Spawns nötig) ----
   const reachable = new Uint8Array(SIZE * SIZE);
   const reachList = [];
@@ -629,15 +657,11 @@ function generateWorld(seed = 20260702) {
   placeScatter(scatterPool, 85, 0);
   placeScatter(elitePool, 35, 90);
 
-  // ---- Boss-Plätze (Spawnsystem in game.js) ----
-  const bossLairs = [
-    { type: 'boss_spider_queen', x: 250, y: 450, r: 5, zone: 'im Spinnenwald westlich von Eichwald' },
-    { type: 'boss_orc_warlord',  x: FORT.x, y: FORT.y, r: 5, zone: 'in der Ork-Festung im Süden' },
-    { type: 'boss_yeti_king',    x: YETI.x, y: YETI.y, r: 5, zone: 'in den Yeti-Bergen im hohen Norden' },
-    { type: 'boss_lich_king',    x: RUIN.x, y: RUIN.y - 12, r: 5, zone: 'in den verfluchten Ruinen im Osten' },
-    { type: 'boss_dragon_lord',  x: LAIR.x, y: LAIR.y, r: 5, zone: 'in der Drachenhöhle im Nordosten' },
-  ];
-  // Mögliche Erscheinungsorte des täglichen Weltbosses
+  // ---- Boss-Plätze: Höhlen (Spawnsystem + Quest-Kopplung in game.js) ----
+  const bossLairs = bossCaves.map((bc) => ({
+    type: bc.type, x: bc.cx, y: bc.cy, r: 4, quest: bc.quest, zone: bc.zone,
+  }));
+  // Mögliche Erscheinungsorte des Weltbosses (Uralter Titan)
   const worldBossSpots = [
     { x: 576, y: 760, name: 'südlich von Kiria' },
     { x: 400, y: 576, name: 'westlich von Kiria' },

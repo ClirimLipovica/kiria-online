@@ -133,6 +133,7 @@ function publicMonster(m) {
   return {
     id: m.id, type: m.type, name: def.name, x: m.x, y: m.y, hp: m.hp, maxHp: m.maxHp,
     mv: def.moveMs, boss: def.boss ? true : undefined,
+    worldBoss: def.worldBoss ? true : undefined,
   };
 }
 
@@ -542,6 +543,8 @@ function killMonster(m, killer) {
     dirtyPrivate.add(p.id);
   }
   m.damageBy = {};
+  // Boss-Wächter respawnen nicht – sie existieren nur mit ihrem Boss
+  if (m.guard) monsters.delete(m.id);
 }
 
 function publicCorpse(c) {
@@ -598,69 +601,111 @@ function announce(text) {
 }
 
 // ---------------- Boss-System ----------------
-// Feste Bosse an ihren Plätzen (respawnen nach 45–75 Minuten) +
-// ein Weltboss, der einmal pro Tag an wechselnden Orten erscheint.
-const BOSS_RESPAWN_MIN = 45 * 60000;
-const BOSS_RESPAWN_VAR = 30 * 60000;
-const WORLD_BOSS_FIRST_MS = 10 * 60000;   // erster Titan 10 Min. nach Serverstart
-const WORLD_BOSS_INTERVAL = 22 * 3600000; // danach ~einmal pro Tag
+// Feste Bosse sitzen in Höhlen und erscheinen NUR, wenn ein Spieler mit
+// der passenden Quest die Höhle betritt – mitsamt ihren Wächtern.
+// Der Weltboss (Uralter Titan) erscheint nur am 13. des Monats, 18–19 Uhr.
+const BOSS_RESPAWN_MS = 8 * 60000;        // nach Tod 8 Min. Ruhe, dann wieder beschwörbar
+const BOSS_TRIGGER_DIST = 24;             // so nah muss man mit Quest an die Höhle
+const WORLD_BOSS_SPOT = { x: 576, y: 720, name: 'auf dem großen Feld südlich von Kiria' };
 
 const bossStates = [];
-const worldBoss = { monsterId: null, nextAt: 0, spot: null };
+const worldBoss = { monsterId: null, spawnedThisWindow: false, spot: null };
 
 function initBosses() {
-  const now = Date.now();
   for (const lair of world.bossLairs) {
-    // erste Bosse erscheinen 2–8 Minuten nach Serverstart
-    bossStates.push({ ...lair, monsterId: null, nextAt: now + 120000 + Math.random() * 360000 });
+    bossStates.push({ ...lair, monsterId: null, guardIds: [], nextAt: 0 });
   }
-  worldBoss.nextAt = now + WORLD_BOSS_FIRST_MS;
+}
+
+// Zeitfenster des Weltbosses: 13. Tag des Monats, 18:00–18:59 (echte Zeit).
+// Mit Umgebungsvariable TITAN_ALWAYS=1 zum Testen dauerhaft offen.
+function titanWindowOpen(now) {
+  if (process.env.TITAN_ALWAYS === '1') return true;
+  const d = new Date(now);
+  return d.getDate() === 13 && d.getHours() === 18;
+}
+
+function despawnBossGuards(b) {
+  for (const gid of b.guardIds) {
+    const g = monsters.get(gid);
+    if (g && !g.dead) { removeFromMap(g); events.push({ t: 'die', id: gid }); }
+    monsters.delete(gid);
+  }
+  b.guardIds = [];
 }
 
 function onBossKilled(m, def, killer) {
   const killerName = killer && killer.name ? killer.name : 'Ein Held';
   if (def.worldBoss) {
     worldBoss.monsterId = null;
-    worldBoss.nextAt = Date.now() + WORLD_BOSS_INTERVAL;
-    announce(`🏆 ${killerName} und seine Verbündeten haben den URALTEN TITANEN bezwungen! Kiria ist gerettet – bis morgen…`);
+    announce(`🏆 ${killerName} und seine Verbündeten haben den URALTEN TITANEN bezwungen! Kiria ist gerettet.`);
   } else {
     const state = bossStates.find((b) => b.monsterId === m.id);
     if (state) {
       state.monsterId = null;
-      state.nextAt = Date.now() + BOSS_RESPAWN_MIN + Math.random() * BOSS_RESPAWN_VAR;
+      state.nextAt = Date.now() + BOSS_RESPAWN_MS;
+      despawnBossGuards(state); // verbliebene Wächter ziehen sich zurück
     }
-    announce(`🏆 ${killerName} hat ${def.name} besiegt!`);
+    announce(`🏆 ${killerName} hat ${def.name} bezwungen!`);
   }
-  // Boss-Objekt entfernen – neuer Spawn kommt über das Boss-System
   monsters.delete(m.id);
 }
 
 function updateBosses(now) {
+  // ---- Feste Höhlen-Bosse ----
   for (const b of bossStates) {
-    if (b.monsterId && monsters.has(b.monsterId)) continue;
-    b.monsterId = null;
-    if (now >= b.nextAt) {
-      const m = spawnMonster(b.type, { x: b.x, y: b.y, r: b.r });
-      if (m) {
-        b.monsterId = m.id;
-        announce(`⚠️ ${MONSTERS[b.type].name} ist ${b.zone} erschienen!`);
-      } else {
-        b.nextAt = now + 30000;
+    if (b.monsterId && monsters.has(b.monsterId)) continue; // Boss lebt
+    if (b.monsterId) { b.monsterId = null; despawnBossGuards(b); }
+    if (now < b.nextAt) continue;
+    // Ist ein Spieler mit AKTIVER Boss-Quest nah genug an der Höhle?
+    let trigger = null;
+    for (const p of players.values()) {
+      if (p.dead) continue;
+      const st = p.quests[b.quest];
+      if (!st || st.s !== 'active') continue;
+      if (Math.hypot(p.x - b.x, p.y - b.y) <= BOSS_TRIGGER_DIST) { trigger = p; break; }
+    }
+    if (!trigger) continue;
+    const m = spawnMonster(b.type, { x: b.x, y: b.y, r: b.r });
+    if (!m) { b.nextAt = now + 15000; continue; }
+    b.monsterId = m.id;
+    // Wächter mit erscheinen lassen
+    const def = MONSTERS[b.type];
+    b.guardIds = [];
+    if (def.guards) {
+      for (let i = 0; i < def.guards.count; i++) {
+        const g = spawnMonster(def.guards.type, { x: b.x, y: b.y, r: b.r + 2 });
+        if (g) { g.guard = true; b.guardIds.push(g.id); }
+      }
+    }
+    // Nur Spieler in der Höhle benachrichtigen
+    for (const p of players.values()) {
+      if (Math.hypot(p.x - b.x, p.y - b.y) <= BOSS_TRIGGER_DIST + 8) {
+        info(p, `⚔️ ${def.name} erhebt sich ${b.zone} – gemeinsam mit ihren Wächtern! Zum Kampf!`);
       }
     }
   }
-  if (!worldBoss.monsterId || !monsters.has(worldBoss.monsterId)) {
-    worldBoss.monsterId = null;
-    if (now >= worldBoss.nextAt) {
-      const spot = world.worldBossSpots[randInt(0, world.worldBossSpots.length - 1)];
-      const m = spawnMonster('world_titan', { x: spot.x, y: spot.y, r: 6 });
+
+  // ---- Weltboss (Uralter Titan) ----
+  const titanAlive = worldBoss.monsterId && monsters.has(worldBoss.monsterId);
+  if (titanWindowOpen(now)) {
+    if (!titanAlive && !worldBoss.spawnedThisWindow) {
+      const m = spawnMonster('world_titan', { x: WORLD_BOSS_SPOT.x, y: WORLD_BOSS_SPOT.y, r: 6 });
       if (m) {
         worldBoss.monsterId = m.id;
-        worldBoss.spot = spot;
-        announce(`💀💀💀 DER URALTE TITAN ist erwacht – ${spot.name}! Öffne die Karte (M), versammelt euch und stellt ihn GEMEINSAM!`);
-      } else {
-        worldBoss.nextAt = now + 60000;
+        worldBoss.spawnedThisWindow = true;
+        worldBoss.spot = WORLD_BOSS_SPOT;
+        announce(`💀💀💀 DER URALTE TITAN ist erwacht – ${WORLD_BOSS_SPOT.name}! Öffnet die Karte (M) und stellt ihn GEMEINSAM, ehe die Stunde vergeht!`);
       }
+    }
+  } else {
+    worldBoss.spawnedThisWindow = false;
+    if (titanAlive) {
+      const m = monsters.get(worldBoss.monsterId);
+      if (m) { removeFromMap(m); events.push({ t: 'die', id: m.id }); }
+      monsters.delete(worldBoss.monsterId);
+      worldBoss.monsterId = null;
+      announce('💀 Der Uralte Titan versinkt wieder in der Tiefe – bis zum nächsten Mal…');
     }
   }
 }
@@ -1539,4 +1584,6 @@ module.exports = {
   tryMove, setTarget, setOutfit, castSpell, usePotion, buyItem, sellItem,
   equipItem, unequipItem, useItem, lootCorpse, mountToggle,
   dismissPet, petStash, petDeploy, petRelease, chat, questAccept, questComplete,
+  // für Tests:
+  updateBosses, titanWindowOpen, bossStates, worldBoss,
 };

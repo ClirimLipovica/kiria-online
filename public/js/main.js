@@ -106,7 +106,8 @@ socket.on('welcome', (data) => {
 
   initThree();
   world = new World3D(scene, data.world);
-  world.ensureChunks(you.x, you.y);
+  // Beim Start alle umliegenden Chunks sofort bauen (danach 1/Frame)
+  for (let i = 0; i < 60; i++) { if (!world.ensureChunks(you.x, you.y)) break; }
   fx.initEffects(scene);
   ui.initMinimap(world);
 
