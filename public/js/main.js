@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { World3D } from './world3d.js';
 import { Entity, OUTFITS } from './entities.js';
 import * as fx from './effects.js';
@@ -155,7 +157,7 @@ socket.on('welcome', (data) => {
   initInput();
   requestAnimationFrame(loop);
 
-  window.KIRIA = { entities, npcData, camera, self: () => entities.get(selfId) };
+  window.KIRIA = { entities, npcData, camera, world, self: () => entities.get(selfId) };
 });
 
 function initThree() {
@@ -173,8 +175,29 @@ function initThree() {
 
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.55, 0.85);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.6, 0.82);
   composer.addPass(bloom);
+
+  // Farb-Grading + Vignette: mehr Sättigung, sanfter Kontrast und ein
+  // dunkler Bildrand – das gibt den modernen "Cinematic"-Look.
+  const gradePass = new ShaderPass({
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: `varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        c.rgb = mix(vec3(l), c.rgb, 1.22);          // Sättigung
+        c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;         // Kontrast
+        c.rgb *= vec3(1.02, 1.0, 0.985);            // warmer Stich
+        float d = distance(vUv, vec2(0.5));
+        c.rgb *= 0.78 + 0.26 * smoothstep(0.85, 0.35, d); // Vignette
+        gl_FragColor = c;
+      }`,
+  });
+  composer.addPass(gradePass);
+  composer.addPass(new OutputPass()); // Tonemapping + sRGB-Ausgabe
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;

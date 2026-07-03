@@ -307,7 +307,7 @@ export class World3D {
     this.waterGeo = geo;
     this.waterBase = Float32Array.from(geo.attributes.position.array);
     const mat = new THREE.MeshPhongMaterial({
-      color: 0x2b6b9e, transparent: true, opacity: 0.8, shininess: 90, specular: 0x88bbdd,
+      color: 0x2e78ac, transparent: true, opacity: 0.78, shininess: 140, specular: 0xaad4ee,
     });
     this.water = new THREE.Mesh(geo, mat);
     this.water.position.set(0, 0.3, 0);
@@ -586,8 +586,30 @@ export class World3D {
     }
   }
 
-  // ================= HIMMEL: Sonne, Mond, Sterne =================
+  // ================= HIMMEL: Kuppel, Sonne, Mond, Sterne =================
   _buildSky() {
+    // Himmels-Kuppel mit weichem Farbverlauf (statt flacher Hintergrundfarbe)
+    this.skyUniforms = {
+      topColor: { value: new THREE.Color(0x6aa8e8) },
+      horizonColor: { value: new THREE.Color(0xd8e8f4) },
+    };
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: this.skyUniforms,
+      vertexShader: `varying vec3 vPos;
+        void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform vec3 topColor; uniform vec3 horizonColor; varying vec3 vPos;
+        void main() {
+          float h = clamp(normalize(vPos).y * 1.8 + 0.18, 0.0, 1.0);
+          gl_FragColor = vec4(mix(horizonColor, topColor, pow(h, 0.8)), 1.0);
+        }`,
+    });
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(200, 24, 14), skyMat);
+    this.skyDome.frustumCulled = false;
+    this.skyDome.renderOrder = -100;
+    this.scene.add(this.skyDome);
+
     const disc = (color, glow) => {
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 64;
@@ -775,9 +797,9 @@ export class World3D {
   }
 
   _buildLights() {
-    this.hemi = new THREE.HemisphereLight(0xd4e8ff, 0x5f4f38, 0.95);
+    this.hemi = new THREE.HemisphereLight(0xd8e8ff, 0x6a5840, 1.0);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff0d0, 1.7);
+    this.sun = new THREE.DirectionalLight(0xffedc8, 1.9);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.near = 5;
@@ -788,11 +810,14 @@ export class World3D {
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
 
-    this.scene.fog = new THREE.FogExp2(0xbfd8e8, 0.015);
+    this.scene.fog = new THREE.FogExp2(0xbfd8e8, 0.013);
     this.scene.background = new THREE.Color(0x9ec8e8);
-    this._skyDay = new THREE.Color(0x9ecff0);
-    this._skyNight = new THREE.Color(0x090e20);
-    this._skyDawn = new THREE.Color(0xd8996a);
+    this._skyDay = new THREE.Color(0x5a9ae0);      // sattes Himmelblau (Zenit)
+    this._skyNight = new THREE.Color(0x070b1c);
+    this._skyDawn = new THREE.Color(0xd8895a);
+    this._horDay = new THREE.Color(0xcfe6f4);      // heller Horizont
+    this._horNight = new THREE.Color(0x141a30);
+    this._horDawn = new THREE.Color(0xf0b070);
   }
 
   // ================= UPDATE =================
@@ -827,12 +852,17 @@ export class World3D {
     const dawn = Math.max(0, 1 - Math.abs(dayness - 0.15) * 6) * (dayness > 0.01 ? 1 : 0);
     const night = Math.max(0, 1 - dayness * 2.5);
 
-    this.sun.intensity = 0.15 + dayness * 1.6;
-    this.hemi.intensity = 0.3 + dayness * 0.75;
+    this.sun.intensity = 0.15 + dayness * 1.75;
+    this.hemi.intensity = 0.32 + dayness * 0.8;
     const sky = this._skyNight.clone().lerp(this._skyDay, dayness);
-    if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.5);
+    if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.45);
+    const horizon = this._horNight.clone().lerp(this._horDay, dayness);
+    if (dawn > 0) horizon.lerp(this._horDawn, dawn * 0.7);
     this.scene.background.copy(sky);
-    this.scene.fog.color.copy(sky);
+    this.scene.fog.color.copy(horizon);
+    this.skyUniforms.topColor.value.copy(sky);
+    this.skyUniforms.horizonColor.value.copy(horizon);
+    this.skyDome.position.set(center.x, 0, center.z);
     this.starMat.opacity = night * 0.9;
 
     const sunX = Math.cos(sunAngle), sunY = Math.sin(sunAngle);

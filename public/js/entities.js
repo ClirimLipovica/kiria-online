@@ -584,6 +584,17 @@ export function makeMonsterVisual(type) {
     case 'shadow_demon': return makeHumanoid({ skin: 0x3a2a4a, shirt: 0x261a33, legs: 0x1a1224, scale: 1.5, horns: true, wings: true, hat: 'none' });
     case 'reaper':   return makeGhost(0x2a2a35, 1.5);
     case 'obsidian_golem': return makeHumanoid({ skin: 0x26262e, shirt: 0x1e1e26, legs: 0x16161c, scale: 1.8, bulky: true, oneEye: true, hat: 'none' });
+    // ---- Neue Arten (v10) ----
+    case 'sheep':    return makeQuadruped({ color: 0xe8e8e0, scale: 0.8, earColor: 0x9a9088, snoutColor: 0x8a8078 });
+    case 'giant_beetle': return makeSpider(0.85, 0x4a3a1a, 0x33280f);
+    case 'king_cobra': return makeSnake(1.6, 0xc8a03a, 0x8a6a1e);
+    case 'swamp_lurker': return makeHumanoid({ skin: 0x5a7a4a, shirt: 0x44603a, legs: 0x33482c, hunched: true, longArms: true, hat: 'none', scale: 1.15 });
+    case 'forest_spirit': return makeGhost(0x7ad87a, 1.2, true);
+    case 'cave_bear': return makeQuadruped({ color: 0x44342a, scale: 1.7, earColor: 0x2e221c, tail: false });
+    case 'storm_eagle': return makeDragon(0x9a7a4a, 0xd8d0c0, 0.75);
+    case 'mammoth':  return makeQuadruped({ color: 0x8a6a4a, scale: 2.0, tusks: true, snoutColor: 0x6a4a30, mane: 0x6a4a30 });
+    case 'dire_wolf': return makeQuadruped({ color: 0x2e2e38, scale: 1.5, earColor: 0x1e1e26, mane: 0x44444f });
+    case 'spectral_dragon': return makeDragon(0x8ad8d0, 0x4aa89a, 1.1);
     // ---- Bosse ----
     case 'boss_spider_queen': return makeSpider(2.9, 0x5a1a2a, 0x3a0a1a);
     case 'boss_orc_warlord':  return makeHumanoid({ skin: 0x5a8a3a, shirt: 0x6a1a1a, legs: 0x33281c, scale: 1.9, bulky: true, hat: 'helmet', plume: true, shoulders: true, cape: true, capeColor: 0x8a2020 });
@@ -714,6 +725,7 @@ const TALL_TYPES = new Set([
   'dragon', 'demon', 'cyclops', 'minotaur', 'wyrm', 'golem',
   'frost_dragon', 'phoenix', 'griffin', 'frost_giant', 'treant',
   'ice_golem', 'obsidian_golem', 'shadow_demon', 'ogre', 'yeti',
+  'mammoth', 'spectral_dragon',
 ]);
 
 export class Entity {

@@ -326,11 +326,21 @@ function renderInventory() {
   const b = $('invBox');
   if (b.style.display !== 'block' || !you) return;
 
+  const skillBar = (label, s, hint) => {
+    if (!s) return '';
+    return `<div class="row" title="${hint}"><span>${label} <b style="color:#e8c165">${s.lvl}</b></span>
+      <span style="flex:1;max-width:110px;height:8px;background:#201a14;border-radius:3px;overflow:hidden;margin:5px 0 0 8px">
+      <span style="display:block;height:100%;width:${s.pct}%;background:linear-gradient(180deg,#d8c26a,#96803a)"></span></span></div>`;
+  };
   let html = `<h3>🎒 ${you.name}</h3>
     <div class="row"><span>Level</span><b>${you.level} (${defs.VOCATIONS[you.vocation].name})</b></div>
     <div class="row"><span>Gold</span><b>💰 ${you.gold}</b></div>
-    <div class="row"><span>Angriff</span><b>⚔ ${you.atk}</b></div>
+    <div class="row"><span>Angriffskraft</span><b>⚔ ${you.atk}</b></div>
     <div class="row"><span>Verteidigung</span><b>🛡 ${you.def}</b></div>
+    <h3 style="margin-top:10px">Fertigkeiten <small style="color:#a89878;font-weight:normal">(steigen durch Benutzen!)</small></h3>
+    ${skillBar('⚔ Angriff', you.skills && you.skills.atk, 'Steigt durch Angriffe – macht deine Schläge stärker')}
+    ${skillBar('🛡 Schildkunst', you.skills && you.skills.shield, 'Steigt, wenn du Treffer einsteckst (mit Schild schneller) – du nimmst weniger Schaden')}
+    ${skillBar('✨ Magie-Level', you.skills && you.skills.magic, 'Steigt durch verbrauchtes Mana – stärkere Zauber & Heilung' + (you.vocation === 'tamer' ? ', stärkere Zähmungen!' : ''))}
     <h3 style="margin-top:10px">Ausrüstung</h3>`;
   b.innerHTML = html;
 

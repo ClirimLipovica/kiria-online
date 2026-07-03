@@ -10,6 +10,7 @@ const storage = require('./storage');
 const {
   MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS,
   MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
+  skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 } = require('./constants');
 const { generateWorld, isWalkable } = require('./world');
 
@@ -139,8 +140,8 @@ function publicMonster(m) {
 function petStats(type, level) {
   const def = MONSTERS[type];
   return {
-    maxHp: Math.round(def.hp * 1.6 * (1 + 0.12 * (level - 1))),
-    dmg: def.dmg * 1.2 * (1 + 0.10 * (level - 1)),
+    maxHp: Math.round(def.hp * 1.9 * (1 + 0.12 * (level - 1))),
+    dmg: def.dmg * 1.35 * (1 + 0.10 * (level - 1)),
   };
 }
 
@@ -273,6 +274,10 @@ function privatePlayer(p) {
     gold: p.gold, speed: effectiveSpeed(p), food: Math.round(p.food),
     inv: p.inv, eq: p.eq, quests: p.quests, mounts: p.mounts,
     atk: Math.round(meleeBase(p)), def: armorDef(p),
+    skills: Object.fromEntries(['atk', 'shield', 'magic'].map((k) => [k, {
+      lvl: p.skills[k].lvl,
+      pct: p.skills[k].lvl >= SKILL_CAP ? 100 : Math.min(99, Math.floor(100 * p.skills[k].pts / skillNext(k, p.skills[k].lvl))),
+    }])),
     buffs: {
       atk: Math.max(0, p.buffs.atk - now), def: Math.max(0, p.buffs.def - now),
       speed: Math.max(0, p.buffs.speed - now), light: Math.max(0, p.buffs.light - now),
@@ -327,6 +332,9 @@ function createPlayer(socket, account) {
     mounts: save && save.mounts ? save.mounts : [],
     mounted: null,
     petStable: save && save.petStable ? save.petStable : [],
+    skills: save && save.skills ? save.skills : {
+      atk: { lvl: 10, pts: 0 }, shield: { lvl: 10, pts: 0 }, magic: { lvl: 0, pts: 0 },
+    },
     buffs: { atk: 0, def: 0, speed: 0, light: 0, regen: 0 },
     skullUntil: 0, skullMsgAt: 0,
     pet: null,
@@ -356,7 +364,7 @@ function saveData(p) {
     mapV: MAP_VERSION,
     x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold, food: p.food,
     hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq, quests: p.quests,
-    mounts: p.mounts, petStable: p.petStable,
+    mounts: p.mounts, petStable: p.petStable, skills: p.skills,
     pet: p.pet ? { type: p.pet.type, level: p.pet.level, xp: p.pet.xp } : null,
   };
 }
@@ -369,20 +377,43 @@ function removePlayer(p) {
   for (const o of players.values()) if (o.targetId === p.id) o.targetId = null;
 }
 
+// ---------------- Fertigkeiten (Skills) ----------------
+// Training durch BENUTZEN: Angriff durch Schläge, Schildkunst durch
+// erlittene Treffer, Magie durch verbrauchtes Mana. Das Tempo hängt
+// vom Beruf ab (Ritter skillt Angriff schnell, Magier die Magie …).
+function trainSkill(p, kind, points) {
+  const s = p.skills[kind];
+  if (!s || s.lvl >= SKILL_CAP) return;
+  s.pts += points * VOCATIONS[p.vocation].skills[kind];
+  const need = skillNext(kind, s.lvl);
+  if (s.pts >= need) {
+    s.pts -= need;
+    s.lvl++;
+    const names = { atk: '⚔ Dein Angriff', shield: '🛡 Deine Schildkunst', magic: '✨ Dein Magie-Level' };
+    info(p, `${names[kind]} steigt auf ${s.lvl}!`);
+    events.push({ t: 'fx', kind: 'buff', at: [p.x, p.y], style: 'atk' });
+    events.push({ t: 'levelup', id: p.id, level: p.level });
+    dirtyPrivate.add(p.id);
+  }
+}
+
 // ---------------- Kampfformeln ----------------
 function meleeBase(p) {
   const voc = VOCATIONS[p.vocation];
   const wAtk = p.eq.weapon ? ITEMS[p.eq.weapon].atk : 0;
   let base = (12 + p.level * 1.8 + wAtk * 1.4) * voc.melee;
+  base *= 1 + (p.skills.atk.lvl - 10) * 0.03; // ⚔ Angriffs-Skill
   if (p.buffs.atk > Date.now()) base *= 1.4;
   return base;
 }
 
+// Rüstung schützt – aber erst gute 🛡 Schildkunst schützt DICH
 function armorDef(p) {
   let def = Math.floor(p.level * 0.3);
   for (const slot of ['armor', 'legs', 'helmet', 'shield', 'boots']) {
     if (p.eq[slot]) def += ITEMS[p.eq[slot]].def || 0;
   }
+  def += Math.round((p.skills.shield.lvl - 10) * 1.2);
   return def;
 }
 
@@ -392,13 +423,16 @@ function meleeDamage(p) {
 
 function spellDamage(p, base, perLvl) {
   const voc = VOCATIONS[p.vocation];
-  return Math.max(1, Math.round((base + p.level * perLvl) * voc.spell * (0.85 + Math.random() * 0.3)));
+  const mlBonus = 1 + p.skills.magic.lvl * 0.04; // ✨ Magie-Level
+  return Math.max(1, Math.round((base + p.level * perLvl) * voc.spell * mlBonus * (0.85 + Math.random() * 0.3)));
 }
 
-// Roh-Schaden auf Spieler anwenden (Rüstung + Schutzzauber)
+// Roh-Schaden auf Spieler anwenden (Rüstung + Schildkunst + Schutzzauber)
 function applyDamageToPlayer(target, raw, source) {
   let dmg = Math.max(1, Math.round(raw * (50 / (50 + armorDef(target)))));
   if (target.buffs.def > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.6));
+  // Getroffen werden trainiert die Schildkunst (mit Schild schneller)
+  trainSkill(target, 'shield', target.eq.shield && !ITEMS[target.eq.shield].light ? 1.5 : 1);
   damagePlayer(target, dmg, source);
 }
 
@@ -741,7 +775,7 @@ function castSpell(p, spellId) {
   if (p.mp < spell.mana) return info(p, 'Nicht genug Mana.');
 
   if (spell.kind === 'heal') {
-    const heal = Math.round((30 + p.level * 5) * spell.power * voc.spell);
+    const heal = Math.round((30 + p.level * 5) * spell.power * voc.spell * (1 + p.skills.magic.lvl * 0.03));
     p.hp = Math.min(p.maxHp, p.hp + heal);
     events.push({ t: 'heal', id: p.id, amount: heal });
     dirtyHp.set(p.id, [p.hp, p.maxHp]);
@@ -834,18 +868,24 @@ function castSpell(p, spellId) {
     if (!def.tame) return info(p, `${def.name} kann nicht gezähmt werden.`);
     if (p.pet) return info(p, 'Du hast schon ein aktives Tier. Deponiere es im Stall (Inventar).');
     if (cheb(p, m) > spell.range) return info(p, 'Geh näher heran.');
+    // Starke Bestien brauchen ein hohes ✨ Magie-Level!
+    const ml = p.skills.magic.lvl;
+    const reqMl = tameMlRequired(def.hp);
+    if (ml < reqMl) return info(p, `${def.name} ist zu mächtig für dich – du brauchst Magie-Level ${reqMl} (du hast ${ml}). Wirke Zauber, um Magie zu trainieren!`);
     const hpPct = m.hp / m.maxHp;
     if (hpPct > 0.6) return info(p, 'Das Tier ist noch zu stark – schwäche es unter 60% Leben!');
-    const chance = 0.35 + 0.6 * ((0.6 - hpPct) / 0.6);
+    const chance = Math.min(0.95, 0.35 + 0.6 * ((0.6 - hpPct) / 0.6) + ml * 0.01);
     if (Math.random() < chance) {
       m.dead = true;
       m.targetId = null;
       m.respawnAt = now + 30000 + Math.random() * 20000;
       removeFromMap(m);
       events.push({ t: 'die', id: m.id });
-      const pet = createPet(p, m.type);
+      // Höheres Magie-Level = das Tier startet gleich stärker!
+      const startLvl = tameStartLevel(ml);
+      const pet = createPet(p, m.type, startLvl);
       events.push({ t: 'fx', kind: 'tame', at: [pet.x, pet.y] });
-      info(p, `🐾 Du hast eine ${def.name} gezähmt! Sie kämpft jetzt für dich.`);
+      info(p, `🐾 Du hast ${def.name} gezähmt${startLvl > 1 ? ` – dank Magie-Level ${ml} startet es auf Stufe ${startLvl}!` : '! Es kämpft jetzt für dich.'}`);
       p.targetId = null;
     } else {
       info(p, `${def.name} hat sich losgerissen! Versuch es nochmal.`);
@@ -868,6 +908,10 @@ function castSpell(p, spellId) {
 
   p.mp -= spell.mana;
   p.spellCds[spellId] = now + spell.cd;
+  // Mana ausgeben trainiert das ✨ Magie-Level
+  trainSkill(p, 'magic', spell.mana);
+  // Nahkampf-Zauber trainieren zusätzlich den ⚔ Angriff
+  if (spell.kind === 'strike' || spell.kind === 'aoe1') trainSkill(p, 'atk', 1);
   dirtyPrivate.add(p.id);
 }
 
@@ -1250,7 +1294,7 @@ function petAI(pet, now) {
   if (tgt) {
     const d = cheb(pet, tgt);
     if (d <= 1) {
-      if (now - pet.lastAtk > 1500) {
+      if (now - pet.lastAtk > 1300) {
         pet.lastAtk = now;
         const stats = petStats(pet.type, pet.level);
         let dmg = stats.dmg * (0.6 + Math.random() * 0.5);
@@ -1315,6 +1359,7 @@ function playerAutoAttack(p, now) {
     p.lastAtk = now;
     events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [m.x, m.y] });
     damageMonster(m, meleeDamage(p), p, 'melee');
+    trainSkill(p, 'atk', 1);
   } else if (enemy && !enemy.dead) {
     // PvP: nur außerhalb der Städte, Angreifer bekommt Totenkopf
     if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return;
@@ -1324,6 +1369,7 @@ function playerAutoAttack(p, now) {
     p.lastAtk = now;
     events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [enemy.x, enemy.y] });
     applyDamageToPlayer(enemy, meleeDamage(p), p);
+    trainSkill(p, 'atk', 1);
     markSkull(p);
   } else if (enemyPet && enemyPet.ownerId !== p.id) {
     // Gegnerisches Tier angreifen = ebenfalls PvP
@@ -1334,6 +1380,7 @@ function playerAutoAttack(p, now) {
     p.lastAtk = now;
     events.push({ t: 'fx', kind: d > 1 ? voc.atkFx : 'slash', from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
     damagePet(enemyPet, meleeDamage(p), p);
+    trainSkill(p, 'atk', 1);
     markSkull(p);
   } else {
     p.targetId = null;

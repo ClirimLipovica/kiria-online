@@ -575,6 +575,27 @@ function generateWorld(seed = 20260702) {
     { type: 'shadow_demon', count: 4, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 10 },
     { type: 'reaper',   count: 3,  cx: RUIN.x, cy: RUIN.y - 12, rMin: 0, rMax: 8 },
     { type: 'obsidian_golem', count: 4, cx: 1010, cy: 1070, rMin: 0, rMax: 10 },
+    // ---- Neue Arten (v10) ----
+    { type: 'sheep',    count: 10, cx: farm.x + 12, cy: farm.y + 8, rMin: 0, rMax: 12 },
+    { type: 'sheep',    count: 8,  cx: 520, cy: 620, rMin: 0, rMax: 12 },
+    { type: 'giant_beetle', count: 12, cx: 380, cy: 420, rMin: 0, rMax: 12 },
+    { type: 'giant_beetle', count: 12, cx: 640, cy: 520, rMin: 0, rMax: 12 },
+    { type: 'king_cobra', count: 10, cx: 270, cy: 660, rMin: 0, rMax: 12 },
+    { type: 'king_cobra', count: 8,  cx: 360, cy: 950, rMin: 0, rMax: 10 },
+    { type: 'swamp_lurker', count: 10, cx: 240, cy: 620, rMin: 0, rMax: 14 },
+    { type: 'swamp_lurker', count: 8,  cx: 200, cy: 680, rMin: 0, rMax: 10 },
+    { type: 'forest_spirit', count: 8, cx: 400, cy: 360, rMin: 0, rMax: 12 },
+    { type: 'forest_spirit', count: 8, cx: 660, cy: 720, rMin: 0, rMax: 12 },
+    { type: 'cave_bear', count: 8, cx: 800, cy: 480, rMin: 0, rMax: 12 },
+    { type: 'cave_bear', count: 6, cx: 900, cy: 380, rMin: 0, rMax: 10 },
+    { type: 'storm_eagle', count: 6, cx: 880, cy: 200, rMin: 0, rMax: 10 },
+    { type: 'storm_eagle', count: 5, cx: 700, cy: 160, rMin: 0, rMax: 10 },
+    { type: 'mammoth',  count: 6,  cx: 700, cy: 100, rMin: 0, rMax: 12 },
+    { type: 'mammoth',  count: 5,  cx: 820, cy: 80, rMin: 0, rMax: 10 },
+    { type: 'dire_wolf', count: 6, cx: WWALD.x, cy: WWALD.y - 20, rMin: 0, rMax: 10 },
+    { type: 'dire_wolf', count: 5, cx: 540, cy: 100, rMin: 0, rMax: 10 },
+    { type: 'spectral_dragon', count: 3, cx: RUIN.x + 10, cy: RUIN.y + 10, rMin: 0, rMax: 8 },
+    { type: 'spectral_dragon', count: 3, cx: LAIR.x, cy: LAIR.y + 16, rMin: 0, rMax: 8 },
   );
 
   // Streu-Spawns: zufällige Wildnis-Gruppen auf ERREICHBAREN Kacheln.
@@ -585,10 +606,12 @@ function generateWorld(seed = 20260702) {
   const scatterPool = [
     'rat', 'bat', 'boar', 'wolf', 'spider', 'goblin', 'snake', 'bandit', 'scorpion', 'bear', 'troll', 'orc',
     'chicken', 'fox', 'slime', 'kobold', 'giant_wasp', 'hyena', 'gnoll', 'crocodile', 'pirate',
+    'sheep', 'giant_beetle', 'king_cobra',
   ];
   const elitePool = [
     'witch', 'orc_shaman', 'panther', 'frost_wolf', 'gargoyle', 'basilisk', 'treant',
     'sabertooth', 'hunter', 'dark_elf', 'werewolf', 'ogre', 'harpy', 'ghoul', 'lizardman',
+    'swamp_lurker', 'forest_spirit', 'cave_bear',
   ];
   const placeScatter = (pool, groups, minTownDist) => {
     let placed = 0;

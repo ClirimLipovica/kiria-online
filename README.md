@@ -16,7 +16,12 @@ Node.js-Server (autoritativ) + three.js-Client im Browser.
   - 🔮 **Magier** – magische Geschosse auf Distanz (Exori Vis, Exevo Gran Mas…)
   - 🐺 **Bestienzüchter** – zähmt Bestien, die für ihn kämpfen und mitleveln
     (Utevo Bestia: Ziel unter 60 % Leben)
-- **68 Monsterarten** – vom Huhn bis zum Obsidiangolem, ~1800 Monster
+- **Fertigkeiten-System** (wie in Tibia): ⚔ **Angriff** steigt durch Kämpfen,
+  🛡 **Schildkunst** durch eingesteckte Treffer, ✨ **Magie-Level** durch
+  verbrauchtes Mana – jeder Beruf skillt unterschiedlich schnell. Das
+  Magie-Level bestimmt beim Bestienzüchter, WIE starke Bestien er zähmen
+  kann und auf welcher Stufe sie starten!
+- **78 Monsterarten** – vom Huhn bis zum Obsidiangolem, ~2200 Monster
   gleichzeitig in der Welt, viele davon frei in der Wildnis unterwegs
 - **Schlaue Monster-KI**: Wegfindung um Felsen und Bäume, Rudel-Alarm,
   Rache an Angreifern, Fernkämpfer halten Abstand — und wer Monster
@@ -24,9 +29,11 @@ Node.js-Server (autoritativ) + three.js-Client im Browser.
 - **6 Bosse**: 5 Gebiets-Bosse (Spinnenkönigin, Ork-Kriegsherr, Yeti-König,
   Lichkönig, Drachenfürst) + der **Uralte Titan**, ein Weltboss, der einmal
   pro Tag erscheint und auf der Weltkarte (M) mit 💀 markiert wird
-- **Über 120 Items**: Waffen/Rüstungen in 5+ Qualitätsstufen je Beruf,
+- **Über 125 Items**: Waffen/Rüstungen in 5+ Qualitätsstufen je Beruf,
   Trophäen und Schätze zum Verkaufen (Perlen, Rubine, Diamanten…),
-  16 reitbare Mounts (Pferd, Panther, Greif, Einhorn, Phönix, Drache…)
+  18 reitbare Mounts (Pferd, Panther, Greif, Einhorn, Mammut, Phönix, Drache…)
+- **Moderner Look**: Himmels-Kuppel mit Farbverlauf, Farb-Grading mit
+  Vignette, warmes Licht, sattere Farben – cineastisches Spielgefühl
 - **Wegpunkte**: Karte öffnen (M), Ziel anklicken → 🚩 Fahne auf der Minimap
 - **Städte als echte Schutzzonen** — niemand kann aus der Stadt heraus angreifen
 - **Schönere Städte**: bunte Dächer, Fenster, Türen, Schornsteine,
