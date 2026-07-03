@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Spielfiguren (v7)
-// 28 Monster, Helden mit Mounts und Fackellicht, Hoftiere,
-// Leichen (Beute) und NPCs.
+// Kiria Online 3D – Spielfiguren (v9)
+// 68 Monster + 6 Bosse, Helden mit Mounts und Fackellicht,
+// Hoftiere, Leichen (Beute) und NPCs.
 // ---------------------------------------------------------------
 import * as THREE from 'three';
 
@@ -259,12 +259,11 @@ export function makeAnimal(type) {
 }
 
 // ---------------- Spezielle Monster ----------------
-function makeSnake() {
+function makeSnake(scale = 1, color = 0x4a9a3a, dark = 0x3a7a2e) {
   const g = new THREE.Group();
-  const color = 0x4a9a3a;
   const b1 = box(0.16, 0.12, 0.5, color);
   b1.position.set(0, 0.07, -0.1);
-  const b2 = box(0.14, 0.1, 0.3, 0x3a7a2e);
+  const b2 = box(0.14, 0.1, 0.3, dark);
   b2.position.set(0.1, 0.06, -0.35);
   const head = box(0.18, 0.14, 0.2, color);
   head.position.set(0, 0.1, 0.2);
@@ -272,8 +271,49 @@ function makeSnake() {
   eye1.position.set(-0.05, 0.14, 0.29);
   const eye2 = eye1.clone(); eye2.position.x = 0.05;
   g.add(b1, b2, head, eye1, eye2);
+  g.scale.setScalar(scale);
   g.userData.anim = {};
   g.userData.animType = 'snake';
+  return g;
+}
+
+// Huhn: kleiner Flattervogel für die Höfe und Wiesen
+function makeChicken() {
+  const g = new THREE.Group();
+  const body = box(0.16, 0.14, 0.2, 0xe8e4da);
+  body.position.y = 0.16;
+  const head = box(0.09, 0.09, 0.09, 0xe8e4da);
+  head.position.set(0, 0.3, 0.1);
+  const beak = box(0.03, 0.03, 0.05, 0xd8862a);
+  beak.position.set(0, 0.29, 0.17);
+  const comb = box(0.03, 0.05, 0.06, 0xd83a2a);
+  comb.position.set(0, 0.37, 0.09);
+  g.add(body, head, beak, comb);
+  const anim = { legs: [] };
+  for (const lx of [-0.05, 0.05]) {
+    const l = limb(0.025, 0.1, 0.025, 0xd8862a, lx, 0.1, 0);
+    g.add(l);
+    anim.legs.push(l);
+  }
+  g.userData.anim = anim;
+  g.userData.animType = 'quad';
+  return g;
+}
+
+// Schleim: wabernder Glibberklumpen
+function makeSlime(color = 0x4ad84a) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.78 });
+  const blob = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), mat);
+  blob.position.y = 0.24;
+  blob.scale.y = 0.72;
+  blob.castShadow = true;
+  const e1 = box(0.05, 0.07, 0.03, 0x113311);
+  e1.position.set(-0.09, 0.3, 0.26);
+  const e2 = e1.clone(); e2.position.x = 0.09;
+  g.add(blob, e1, e2);
+  g.userData.anim = { blob };
+  g.userData.animType = 'slime';
   return g;
 }
 
@@ -379,10 +419,9 @@ function makeGhost(color = 0xd8e8f0, scale = 1, emissive = false) {
   return g;
 }
 
-function makeDragon() {
+function makeDragon(red = 0xa82818, dark = 0x781a10, scale = 1) {
   const g = new THREE.Group();
   const anim = {};
-  const red = 0xa82818, dark = 0x781a10;
   const body = box(0.7, 0.55, 1.1, red);
   body.position.y = 0.65;
   const neck = box(0.3, 0.5, 0.3, red);
@@ -407,6 +446,7 @@ function makeDragon() {
     g.add(l);
     return l;
   });
+  g.scale.setScalar(scale);
   g.userData.anim = anim;
   g.userData.animType = 'dragon';
   return g;
@@ -441,24 +481,32 @@ function makeWyrm() {
   return g;
 }
 
-// Fledermaus: kleiner Flatterer
-function makeBat() {
+// Fledermaus (und Riesenwespe): kleiner Flatterer
+function makeBat(bodyColor = 0x3a3240, wingColor = 0x2a2430, eyeColor = 0xff4433, scale = 1, stripes = null) {
   const g = new THREE.Group();
   const anim = {};
-  const body = box(0.14, 0.14, 0.16, 0x3a3240);
+  const body = box(0.14, 0.14, 0.16, bodyColor);
   body.position.y = 0.75;
-  const e1 = box(0.03, 0.06, 0.02, 0x3a3240);
+  const e1 = box(0.03, 0.06, 0.02, bodyColor);
   e1.position.set(-0.04, 0.86, 0);
   const e2 = e1.clone(); e2.position.x = 0.04;
-  const eye1 = box(0.025, 0.025, 0.02, 0xff4433);
+  const eye1 = box(0.025, 0.025, 0.02, eyeColor);
   eye1.position.set(-0.035, 0.78, 0.08);
   const eye2 = eye1.clone(); eye2.position.x = 0.035;
   g.add(body, e1, e2, eye1, eye2);
-  anim.lWing = limb(0.3, 0.03, 0.16, 0x2a2430, -0.08, 0.78, 0);
+  if (stripes) {
+    const s1 = box(0.15, 0.15, 0.03, stripes);
+    s1.position.set(0, 0.75, -0.05);
+    const tail = box(0.05, 0.05, 0.12, stripes);
+    tail.position.set(0, 0.72, -0.13);
+    g.add(s1, tail);
+  }
+  anim.lWing = limb(0.3, 0.03, 0.16, wingColor, -0.08, 0.78, 0);
   anim.lWing.children[0].position.set(-0.15, 0, 0);
-  anim.rWing = limb(0.3, 0.03, 0.16, 0x2a2430, 0.08, 0.78, 0);
+  anim.rWing = limb(0.3, 0.03, 0.16, wingColor, 0.08, 0.78, 0);
   anim.rWing.children[0].position.set(0.15, 0, 0);
   g.add(anim.lWing, anim.rWing);
+  g.scale.setScalar(scale);
   g.userData.anim = anim;
   g.userData.animType = 'bat';
   return g;
@@ -505,6 +553,44 @@ export function makeMonsterVisual(type) {
     case 'wyrm':     return makeWyrm();
     case 'dragon':   return makeDragon();
     case 'demon':    return makeHumanoid({ skin: 0x8a2020, shirt: 0x5a1414, legs: 0x3a0e0e, scale: 1.5, horns: true, wings: true, hat: 'none' });
+    // ---- Neue Arten (v9) ----
+    case 'chicken':  return makeChicken();
+    case 'fox':      return makeQuadruped({ color: 0xc86a2a, scale: 0.7, earColor: 0x8a4218, snoutColor: 0xe8d8c8 });
+    case 'slime':    return makeSlime();
+    case 'kobold':   return makeHumanoid({ skin: 0xb08a5a, shirt: 0x5a4a3a, legs: 0x3a3020, scale: 0.7, earsUp: true, hat: 'none' });
+    case 'giant_wasp': return makeBat(0xd8b02a, 0xc8c8b0, 0x33222a, 1.1, 0x3a3220);
+    case 'hyena':    return makeQuadruped({ color: 0x9a8a5a, scale: 0.95, earColor: 0x5a4a2a, patches: 0x6a5a3a, snoutColor: 0x4a3a20 });
+    case 'gnoll':    return makeHumanoid({ skin: 0x9a8a4a, shirt: 0x6a5a38, legs: 0x4a3e26, snout: 0x7a6a3a, earsUp: true, hat: 'none', scale: 1.05 });
+    case 'crocodile': return makeQuadruped({ color: 0x4a7a3a, scale: 1.15, snoutColor: 0x3a6a2e, tail: true });
+    case 'pirate':   return makeHumanoid({ skin: 0xc89a72, shirt: 0x8a2a2a, legs: 0x2a2a33, hat: 'feather' });
+    case 'witch':    return makeHumanoid({ skin: 0xb8c89a, shirt: 0x4a2a5a, legs: 0x33203f, hat: 'wizard', robe: true, staff: true });
+    case 'orc_shaman': return makeHumanoid({ skin: 0x5a8a3a, shirt: 0x3a4a5c, legs: 0x2a3542, robe: true, staff: true, hat: 'none' });
+    case 'panther':  return makeQuadruped({ color: 0x22262e, scale: 1.05, earColor: 0x1a1c22 });
+    case 'frost_wolf': return makeQuadruped({ color: 0xbcd8e8, scale: 1.1, earColor: 0x8ab0c8, mane: 0xe8f4fa });
+    case 'gargoyle': return makeHumanoid({ skin: 0x8a8a92, shirt: 0x74747c, legs: 0x64646c, wings: true, horns: true, hunched: true, hat: 'none', scale: 1.1 });
+    case 'basilisk': return makeSnake(1.9, 0x6a9a2a, 0x4a7a1e);
+    case 'treant':   return makeHumanoid({ skin: 0x6a8a3a, shirt: 0x5a4326, legs: 0x4a3520, scale: 1.55, bulky: true, longArms: true, hat: 'none' });
+    case 'sabertooth': return makeQuadruped({ color: 0xd8a04a, scale: 1.3, earColor: 0xb0802a, snoutColor: 0xe8d0a8, tusks: true });
+    case 'necromancer': return makeHumanoid({ skin: 0xc8c8b8, shirt: 0x2a3326, legs: 0x1e261c, robe: true, staff: true, hat: 'hood' });
+    case 'medusa':   return makeHumanoid({ skin: 0x8aba7a, shirt: 0x3a6a4a, legs: 0x2a5038, robe: true, earsUp: true, hat: 'none' });
+    case 'unicorn':  return makeQuadruped({ color: 0xf0f0f8, scale: 1.35, mane: 0xd8c8f0, hornsUp: true, snoutColor: 0xe0d8e8 });
+    case 'ice_golem': return makeHumanoid({ skin: 0xa8d0e8, shirt: 0x8ab8d8, legs: 0x6a98b8, scale: 1.55, bulky: true, oneEye: true, hat: 'none' });
+    case 'shadow_assassin': return makeHumanoid({ skin: 0x5a5a6a, shirt: 0x1e1e2a, legs: 0x16161f, hat: 'hood', cape: true, capeColor: 0x26263a });
+    case 'lava_hound': return makeQuadruped({ color: 0x8a2a10, scale: 1.2, earColor: 0x5a1a0a, mane: 0xff6a1a, snoutColor: 0x3a120a });
+    case 'griffin':  return makeDragon(0xc8a03a, 0x8a6a2a, 0.9);
+    case 'frost_giant': return makeHumanoid({ skin: 0xc8dce8, shirt: 0x5a7a92, legs: 0x44607a, scale: 1.9, bulky: true, hat: 'none' });
+    case 'frost_dragon': return makeDragon(0x4a9ad8, 0x2a6aa8);
+    case 'phoenix':  return makeDragon(0xe86a1a, 0xc83a0a, 0.95);
+    case 'shadow_demon': return makeHumanoid({ skin: 0x3a2a4a, shirt: 0x261a33, legs: 0x1a1224, scale: 1.5, horns: true, wings: true, hat: 'none' });
+    case 'reaper':   return makeGhost(0x2a2a35, 1.5);
+    case 'obsidian_golem': return makeHumanoid({ skin: 0x26262e, shirt: 0x1e1e26, legs: 0x16161c, scale: 1.8, bulky: true, oneEye: true, hat: 'none' });
+    // ---- Bosse ----
+    case 'boss_spider_queen': return makeSpider(2.9, 0x5a1a2a, 0x3a0a1a);
+    case 'boss_orc_warlord':  return makeHumanoid({ skin: 0x5a8a3a, shirt: 0x6a1a1a, legs: 0x33281c, scale: 1.9, bulky: true, hat: 'helmet', plume: true, shoulders: true, cape: true, capeColor: 0x8a2020 });
+    case 'boss_yeti_king':    return makeHumanoid({ skin: 0xe8ecf0, shirt: 0xdce4ea, legs: 0xc8d4dc, scale: 2.3, bulky: true, horns: true, hat: 'none' });
+    case 'boss_lich_king':    return makeHumanoid({ skin: 0xb8c0b0, shirt: 0x2a2a3a, legs: 0x20202e, robe: true, staff: true, horns: true, hat: 'none', scale: 1.9 });
+    case 'boss_dragon_lord':  return makeDragon(0x6a1a4a, 0x44102f, 1.7);
+    case 'world_titan':       return makeHumanoid({ skin: 0x8a7a5a, shirt: 0x5a4a30, legs: 0x44381f, scale: 2.8, bulky: true, oneEye: true, hornsSide: true, hat: 'none' });
     default:         return makeQuadruped({ color: 0x999999, scale: 0.8 });
   }
 }
@@ -614,6 +700,9 @@ function animateModel(visual, moving, swing, walkPhase, now) {
     visual.position.y = 0.2 + Math.sin(now * 0.004) * 0.12;
   } else if (type === 'snake') {
     visual.rotation.z = moving ? Math.sin(walkPhase * 1.5) * 0.12 : 0;
+  } else if (type === 'slime') {
+    const squish = 1 + Math.sin(now * 0.006 + walkPhase) * 0.14;
+    a.blob.scale.set(2 - squish, 0.72 * squish, 2 - squish);
   } else if (type === 'ghost') {
     visual.position.y = 0.15 + Math.sin(now * 0.0025 + walkPhase) * 0.09;
     visual.rotation.z = Math.sin(now * 0.0018) * 0.06;
@@ -621,7 +710,11 @@ function animateModel(visual, moving, swing, walkPhase, now) {
 }
 
 // ---------------- Entity ----------------
-const TALL_TYPES = new Set(['dragon', 'demon', 'cyclops', 'minotaur', 'wyrm', 'golem']);
+const TALL_TYPES = new Set([
+  'dragon', 'demon', 'cyclops', 'minotaur', 'wyrm', 'golem',
+  'frost_dragon', 'phoenix', 'griffin', 'frost_giant', 'treant',
+  'ice_golem', 'obsidian_golem', 'shadow_demon', 'ogre', 'yeti',
+]);
 
 export class Entity {
   constructor(data, kind, world) {
@@ -669,11 +762,12 @@ export class Entity {
       this.name = '💰 ' + (data.name || 'Beute');
     } else {
       visual = makeMonsterVisual(data.type);
-      this.labelColor = '#ff8a7a';
+      this.labelColor = data.boss ? '#ffd700' : '#ff8a7a';
     }
+    this.boss = !!data.boss;
     this.visual = visual;
     this.group.add(visual);
-    this.labelY = TALL_TYPES.has(data.type) ? 2.2 : kind === 'corpse' ? 0.7 : 1.5;
+    this.labelY = this.boss ? 3.4 : TALL_TYPES.has(data.type) ? 2.2 : kind === 'corpse' ? 0.7 : 1.5;
 
     this.group.traverse((o) => { o.userData.entityId = this.id; });
     const gy = world.groundY(data.x, data.y);
@@ -757,6 +851,7 @@ export class Entity {
     this.label.sprite.position.y = this.labelY;
     this.label.sprite.userData.entityId = this.id;
     if (this.kind === 'corpse') this.label.sprite.scale.set(1.2, 0.34, 1);
+    if (this.boss) this.label.sprite.scale.set(2.9, 0.81, 1);
     this.group.add(this.label.sprite);
     this.redrawLabel();
   }
@@ -843,13 +938,15 @@ export class Entity {
     if (dx || dy) this.targetFacing = Math.atan2(dx, dy);
   }
 
-  walkTo(x, y, dur) {
+  // exact = true: dur ist bereits die echte Dauer (Netzwerk-Takt),
+  // kein Diagonal-Aufschlag mehr – so laufen alle Figuren flüssig.
+  walkTo(x, y, dur, exact = false) {
     if (x === this.tx && y === this.ty) return;
     this.fx = this.group.position.x; this.fy = this.group.position.z;
     const diag = x !== this.tx && y !== this.ty;
     this.tx = x; this.ty = y;
     this.moveStart = performance.now();
-    this.moveDur = (dur || 300) * (diag ? 1.45 : 1);
+    this.moveDur = (dur || 300) * (!exact && diag ? 1.45 : 1);
     const dx = x - this.fx, dy = y - this.fy;
     if (dx || dy) this.targetFacing = Math.atan2(dx, dy);
   }

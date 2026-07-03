@@ -7,25 +7,37 @@ Node.js-Server (autoritativ) + three.js-Client im Browser.
 
 ## Features
 
-- **Große 3D-Welt** (256×256 Kacheln, prozedural generiert): Insel mit **3 Städten**
-  (Kiria, Porta, Steinfels) samt Straßennetz, Wäldern, Bergen, Friedhof,
+- **Riesige 3D-Welt** (1152×1152 Kacheln, prozedural generiert): Insel mit **7 Städten**
+  samt Straßennetz, Wäldern, Bergen, Friedhof, Ruinen, Labyrinth,
   Drachenhöhle und Dämonen-Vulkan
-- **4 Berufe** mit eigenen Zauberlisten (je 5 Zauber, Tasten 1–5):
+- **4 Berufe** mit eigenen Zauberlisten (je 10 Zauber, Tasten 1–7):
   - 🛡️ **Ritter** – Nahkämpfer (Exori, Exori Gran, Utito Tempo…)
   - 🏹 **Paladin** – kämpft mit Wurfspeeren auf Distanz (Exori San, Utamo Vita…)
   - 🔮 **Magier** – magische Geschosse auf Distanz (Exori Vis, Exevo Gran Mas…)
-  - 🐺 **Bestienzüchter** – zähmt Bestien (Ratte, Schlange, Spinne, Wolf, Bär),
-    die für ihn kämpfen und mitleveln (Utevo Bestia: Ziel unter 60 % Leben)
-- **12 Monster**: Ratte, Schlange, Spinne, Wolf, Ork, Troll, Skelett, Geist,
-  Bär, Zyklop, Drache und Dämon (Bosse mit Feuerbällen)
-- **Volle Ausrüstung** – 5 Slots: Waffe, Rüstung, Helm, Schild, Stiefel
-  (über 20 Items, als Beute oder beim Händler)
-- **Sprechende NPCs** in jeder Stadt (anklicken → Dialog mit Themen + Handel)
-- **8 wählbare Skins** (beim Login und im Inventar jederzeit wechselbar)
+  - 🐺 **Bestienzüchter** – zähmt Bestien, die für ihn kämpfen und mitleveln
+    (Utevo Bestia: Ziel unter 60 % Leben)
+- **68 Monsterarten** – vom Huhn bis zum Obsidiangolem, ~1800 Monster
+  gleichzeitig in der Welt, viele davon frei in der Wildnis unterwegs
+- **Schlaue Monster-KI**: Wegfindung um Felsen und Bäume, Rudel-Alarm,
+  Rache an Angreifern, Fernkämpfer halten Abstand — und wer Monster
+  aus unerreichbaren Ecken beschießt, geht leer aus (Reset + Vollheilung)
+- **6 Bosse**: 5 Gebiets-Bosse (Spinnenkönigin, Ork-Kriegsherr, Yeti-König,
+  Lichkönig, Drachenfürst) + der **Uralte Titan**, ein Weltboss, der einmal
+  pro Tag erscheint und auf der Weltkarte (M) mit 💀 markiert wird
+- **Über 120 Items**: Waffen/Rüstungen in 5+ Qualitätsstufen je Beruf,
+  Trophäen und Schätze zum Verkaufen (Perlen, Rubine, Diamanten…),
+  16 reitbare Mounts (Pferd, Panther, Greif, Einhorn, Phönix, Drache…)
+- **Wegpunkte**: Karte öffnen (M), Ziel anklicken → 🚩 Fahne auf der Minimap
+- **Städte als echte Schutzzonen** — niemand kann aus der Stadt heraus angreifen
+- **Schönere Städte**: bunte Dächer, Fenster, Türen, Schornsteine,
+  Marktstände, Springbrunnen mit Blumenbeeten, Fackeln, Tempel-Fahnen
+- **Sprechende NPCs** in jeder Stadt (anklicken → Dialog mit Themen + Handel),
+  25 Quests mit Questlog (L) und Verfolgung unter der Minimap
+- **12 wählbare Skins** (beim Login und im Inventar jederzeit wechselbar)
 - **Drehbare Kamera** (Q/E), Zoom (Mausrad)
 - **Lebendige Welt**: Schmetterlinge, Vögel, Wolken, Gras, Blumen,
   Glühwürmchen und Fackellicht bei Nacht, Tag/Nacht-Zyklus
-- **Level-System** mit XP, Loot, Buffs, Städte als Schutzzonen, Chat, Minimap
+- **Level-System** mit XP, Loot, Buffs, PvP mit Totenkopf-System, Chat, Minimap
 - **Charaktere werden gespeichert** (Name + Passwort) — Fortschritt bleibt erhalten
 - **Echtes Multiplayer** über Socket.io — alle Spieler in einer Welt
 
@@ -46,14 +58,19 @@ Dann im Browser: **http://localhost:3000**
 | Klick auf Monster | Angreifen (Fernkämpfer bleiben auf Distanz) |
 | Klick auf Boden | Dorthin laufen (Wegfindung) |
 | Klick auf NPC | Reden (Dialog, bei Händlern auch Handel) |
-| 1–5 | Zauber (je nach Beruf) |
-| 6 / 7 | Heiltrank / Manatrank |
+| 1–7 | Zauber (je nach Beruf) |
+| 8 / 9 | Heiltrank / Manatrank |
 | Q / E | Kamera drehen |
 | I | Inventar, Ausrüstung, Tier, Skin |
+| B | Kampfliste (Gegner anvisieren) |
+| Z | Zauberbuch |
+| L | Questlog |
+| M | Weltkarte (Klick = 🚩 Wegpunkt, 💀 = Boss) |
+| R | Reiten (Mount auf/absteigen) |
 | Enter | Chat |
 | ESC | Ziel abwählen / Fenster schließen |
 | Mausrad | Zoom |
-| M | Sound an/aus |
+| K | Sound an/aus |
 
 ## 🌍 Online spielen (mit Freunden außerhalb deines Netzwerks)
 

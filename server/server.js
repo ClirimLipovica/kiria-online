@@ -11,6 +11,9 @@ const path = require('path');
 const { Server } = require('socket.io');
 
 const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, MONSTERS, SHOP_ITEMS, QUESTS } = require('./constants');
+
+// Nur die Namen der Monster an den Client geben (für Stall, Mounts usw.)
+const MONSTER_NAMES = Object.fromEntries(Object.entries(MONSTERS).map(([k, v]) => [k, v.name]));
 const game = require('./game');
 const storage = require('./storage');
 
@@ -51,7 +54,7 @@ io.on('connection', (socket) => {
       const name = String(data.name || '').trim();
       const password = String(data.password || '');
       const vocation = String(data.vocation || 'knight');
-      const outfit = Math.abs(parseInt(data.outfit, 10) || 0) % 8;
+      const outfit = Math.abs(parseInt(data.outfit, 10) || 0) % 12;
 
       if (!NAME_RE.test(name)) return socket.emit('loginError', { msg: 'Name: 3-16 Zeichen (Buchstaben/Zahlen).' });
       if (password.length < 3) return socket.emit('loginError', { msg: 'Passwort: mindestens 3 Zeichen.' });
@@ -89,7 +92,7 @@ io.on('connection', (socket) => {
           fountains: w.fountains,
           farm: w.farm,
         },
-        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS },
+        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS, MONSTER_NAMES },
         you: game.privatePlayer(player),
         players: [...game.players.values()].filter((p) => p.id !== player.id).map(game.publicPlayer),
         monsters: [...game.monsters.values()].filter((m) => !m.dead).map(game.publicMonster),
