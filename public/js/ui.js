@@ -57,7 +57,9 @@ export function initUI(gameDefs, h, vocation) {
     e.stopPropagation();
     if (e.key === 'Enter') {
       const text = $('chatInput').value.trim();
-      if (text) handlers.say(text);
+      const unlock = text.match(/^\/unlock(?:all)?\s+(\S+)/i);
+      if (unlock) { handlers.unlockAll(unlock[1]); }
+      else if (text) handlers.say(text);
       $('chatInput').value = '';
       $('chatInput').blur();
     } else if (e.key === 'Escape') {
@@ -70,6 +72,7 @@ export function initUI(gameDefs, h, vocation) {
   $('questClose').addEventListener('click', () => { $('questBox').style.display = 'none'; });
   $('battleClose').addEventListener('click', () => { $('battleBox').style.display = 'none'; });
   $('spellClose').addEventListener('click', () => { $('spellBox').style.display = 'none'; });
+  $('charClose').addEventListener('click', () => { $('charBox').style.display = 'none'; });
   $('respawnBtn').addEventListener('click', () => handlers.respawn());
 
   $('hud').style.display = 'block';
@@ -134,17 +137,21 @@ export function setYou(y) {
     f.style.color = '#ff7a6e';
   }
 
-  // Tier des Bestienzüchters
-  if (y.pet) {
+  // Tiere des Bestienzüchters (bis zu 2) – Balken untereinander
+  const pets = y.pets || [];
+  if (pets.length) {
     $('petBar').style.display = 'block';
-    $('petName').textContent = `🐾 ${y.pet.name} — Stufe ${y.pet.level}`;
-    $('petFill').style.width = pct(y.pet.hp, y.pet.maxHp);
-    $('petTxt').textContent = `${y.pet.hp} / ${y.pet.maxHp}`;
+    $('petBar').innerHTML = pets.map((pt) => {
+      const p2 = Math.max(0, Math.min(100, (pt.hp / pt.maxHp) * 100));
+      return `<div style="font-size:11px;color:#8fd18a;margin-top:3px">${pt.shiny ? '✨' : '🐾'} ${pt.name} — Stufe ${pt.level}</div>
+        <div class="bar" style="height:10px"><div class="fill" style="width:${p2}%;background:linear-gradient(180deg,#7ec86a,#3e8a2e)"></div><div class="txt" style="line-height:10px;font-size:8px">${pt.hp} / ${pt.maxHp}</div></div>`;
+    }).join('');
   } else {
     $('petBar').style.display = 'none';
   }
 
   renderInventory();
+  if ($('charBox') && $('charBox').style.display === 'block') renderCharMenu();
   if (shopOpen) renderShop();
   updateHotbarCounts();
   renderTracker();
@@ -360,6 +367,75 @@ export function toggleInventory() {
   renderInventory();
 }
 
+// ---------------- Charakter-Menü (Taste C): Outfits & Reittiere ----------------
+const MOUNT_LABEL = { horse: 'Pferd', wolf: 'Wolf', bear: 'Bär', giant_spider: 'Riesenspinne', minotaur: 'Minotaurus', golem: 'Steingolem', wyrm: 'Wyrm', dragon: 'Drache' };
+
+export function toggleCharMenu() {
+  const b = $('charBox');
+  if (b.style.display === 'block') { b.style.display = 'none'; return; }
+  openCharMenu();
+}
+
+function openCharMenu() {
+  $('charBox').style.display = 'block';
+  renderCharMenu();
+}
+
+function unlockText(o) {
+  if (o.unlock === 'start') return '';
+  if (o.unlock.level) return `ab Level ${o.unlock.level}`;
+  if (o.unlock.gold) return `${o.unlock.gold} Gold`;
+  if (o.unlock.quest) return 'per Quest';
+  if (o.unlock.item) return 'per Item';
+  return 'gesperrt';
+}
+
+function renderCharMenu() {
+  if (!you || $('charBox').style.display !== 'block') return;
+  const unlocked = new Set(you.unlockedOutfits || []);
+
+  // --- Outfits ---
+  const ob = $('charOutfits');
+  ob.innerHTML = '';
+  for (const o of defs.OUTFITS || []) {
+    const has = unlocked.has(o.id);
+    const worn = you.outfit === o.id;
+    const buyable = !has && o.unlock && o.unlock.gold;
+    const div = document.createElement('div');
+    div.style.cssText = `padding:6px 8px;border-radius:6px;border:2px solid ${worn ? '#e8c165' : 'transparent'};background:${worn ? '#3a3018' : '#1d1712'};cursor:${has || buyable ? 'pointer' : 'default'};opacity:${has || buyable ? 1 : 0.5};display:flex;justify-content:space-between;align-items:center;gap:6px`;
+    div.innerHTML = `<span style="font-size:11.5px;color:${has ? '#e8dfc8' : '#a89878'}">${worn ? '▶ ' : ''}${o.name}</span>`
+      + (has ? '' : `<span style="font-size:9.5px;color:${buyable ? '#c8a030' : '#8a7a5a'};white-space:nowrap">${buyable ? '💰 ' + o.unlock.gold : '🔒 ' + unlockText(o)}</span>`);
+    if (has) div.onclick = () => handlers.outfit(o.id);
+    else if (buyable) div.onclick = () => { if (confirm(`„${o.name}" für ${o.unlock.gold} Gold kaufen?`)) handlers.outfit(o.id); };
+    ob.appendChild(div);
+  }
+
+  // --- Reittiere ---
+  const mb = $('charMounts');
+  mb.innerHTML = '';
+  const off = document.createElement('div');
+  const walking = !you.mounted;
+  off.style.cssText = `padding:6px 8px;border-radius:6px;border:2px solid ${walking ? '#e8c165' : 'transparent'};background:${walking ? '#3a3018' : '#1d1712'};cursor:pointer;font-size:11.5px;color:#e8dfc8`;
+  off.textContent = (walking ? '▶ ' : '') + '🚶 Zu Fuß';
+  off.onclick = () => handlers.mount(null);
+  mb.appendChild(off);
+  const mounts = you.mounts || [];
+  if (!mounts.length) {
+    const none = document.createElement('div');
+    none.style.cssText = 'font-size:10.5px;color:#776a55;padding:4px';
+    none.textContent = 'Noch keine Reittiere. Große Bestien lassen selten Sättel fallen – oder kauf ein Pferd beim Bauern!';
+    mb.appendChild(none);
+  }
+  for (const mt of mounts) {
+    const riding = you.mounted === mt;
+    const div = document.createElement('div');
+    div.style.cssText = `padding:6px 8px;border-radius:6px;border:2px solid ${riding ? '#e8c165' : 'transparent'};background:${riding ? '#3a3018' : '#1d1712'};cursor:pointer;font-size:11.5px;color:#e8dfc8`;
+    div.textContent = (riding ? '▶ ' : '') + '🐎 ' + (MOUNT_LABEL[mt] || (defs.MONSTER_NAMES && defs.MONSTER_NAMES[mt]) || mt);
+    div.onclick = () => handlers.mount(riding ? null : mt);
+    mb.appendChild(div);
+  }
+}
+
 function renderInventory() {
   const b = $('invBox');
   if (b.style.display !== 'block' || !you) return;
@@ -449,48 +525,34 @@ function renderInventory() {
     b.appendChild(div);
   });
 
-  // Mounts (Reittiere)
-  if (you.mounts && you.mounts.length) {
-    const mDiv = document.createElement('div');
-    mDiv.innerHTML = `<h3 style="margin-top:10px">🐎 Reittiere (Taste R)</h3>`;
-    b.appendChild(mDiv);
-    for (const mt of you.mounts) {
+  // Tiere des Bestienzüchters (bis zu 2 aktiv + Stall, benennbar)
+  if (you.vocation === 'tamer') {
+    const pets = you.pets || [];
+    const petDiv = document.createElement('div');
+    petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Deine Tiere (${pets.length}/${you.maxPets || 2})</h3>`;
+    b.appendChild(petDiv);
+    if (!pets.length) {
+      const none = document.createElement('div');
+      none.className = 'row';
+      none.style.color = '#776a55';
+      none.textContent = 'Kein aktives Tier. Schwäche eine Bestie unter 60% und sprich Utevo Bestia!';
+      b.appendChild(none);
+    }
+    pets.forEach((pt, i) => {
       const div = document.createElement('div');
       div.className = 'invItem';
-      const riding = you.mounted === mt;
-      const mName = (defs.MONSTER_NAMES && defs.MONSTER_NAMES[mt]) || (mt === 'horse' ? 'Pferd' : mt);
-      div.innerHTML = `<span>${riding ? '▶ ' : ''}${mName}</span>`;
-      const btn = document.createElement('button');
-      btn.textContent = riding ? 'Absteigen' : 'Reiten';
-      btn.onclick = () => handlers.mount(riding ? null : mt);
-      div.appendChild(btn);
+      div.innerHTML = `<span>${pt.shiny ? '✨' : ''}${pt.name} <small style="color:#a89878">Stufe ${pt.level} · ${pt.hp}/${pt.maxHp} HP</small></span>`;
+      const btns = document.createElement('span');
+      const ren = mkMiniBtn('✏ Name', () => {
+        const n = prompt('Wie soll dein Tier heißen?', pt.name);
+        if (n) handlers.petRename(pt.id, n);
+      });
+      const stash = mkMiniBtn('🏠 Stall', () => handlers.petStash(i));
+      const free = mkMiniBtn('Frei', () => { if (confirm('Tier wirklich freilassen?')) handlers.dismissPet(i); });
+      btns.appendChild(ren); btns.appendChild(stash); btns.appendChild(free);
+      div.appendChild(btns);
       b.appendChild(div);
-    }
-  }
-
-  // Tiere des Bestienzüchters (aktiv + Stall)
-  if (you.vocation === 'tamer') {
-    const petDiv = document.createElement('div');
-    if (you.pet) {
-      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Aktives Tier</h3>
-        <div class="row"><span>${you.pet.name}</span><b>Stufe ${you.pet.level}</b></div>
-        <div class="row"><span>Leben</span><b>${you.pet.hp} / ${you.pet.maxHp}</b></div>
-        <div class="row"><span>XP</span><b>${you.pet.xp} / ${you.pet.xpNext}</b></div>`;
-      const stash = document.createElement('button');
-      stash.textContent = '🏠 In den Stall';
-      stash.style.cssText = 'margin-top:4px;margin-right:4px;font-size:11px;padding:3px 10px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:4px';
-      stash.onclick = () => handlers.petStash();
-      const free = document.createElement('button');
-      free.textContent = 'Freilassen';
-      free.style.cssText = stash.style.cssText;
-      free.onclick = () => { if (confirm('Tier wirklich freilassen?')) handlers.dismissPet(); };
-      petDiv.appendChild(stash);
-      petDiv.appendChild(free);
-    } else {
-      petDiv.innerHTML = `<h3 style="margin-top:10px">🐾 Aktives Tier</h3>
-        <div class="row" style="color:#776a55">Kein aktives Tier. Schwäche eine Bestie unter 60% und sprich Utevo Bestia (Taste 2)!</div>`;
-    }
-    b.appendChild(petDiv);
+    });
 
     const stableDiv = document.createElement('div');
     stableDiv.innerHTML = `<h3 style="margin-top:10px">🏠 Stall (${(you.petStable || []).length}/6)</h3>`;
@@ -498,12 +560,12 @@ function renderInventory() {
     (you.petStable || []).forEach((entry, i) => {
       const div = document.createElement('div');
       div.className = 'invItem';
-      const petName = (defs.MONSTER_NAMES && defs.MONSTER_NAMES[entry.type]) || entry.type;
-      div.innerHTML = `<span>${petName} <small style="color:#a89878">Stufe ${entry.level}</small></span>`;
+      const petName = entry.name || (defs.MONSTER_NAMES && defs.MONSTER_NAMES[entry.type]) || entry.type;
+      div.innerHTML = `<span>${entry.shiny ? '✨' : ''}${petName} <small style="color:#a89878">Stufe ${entry.level}</small></span>`;
       const btns = document.createElement('span');
       const dep = document.createElement('button');
       dep.textContent = 'Einsetzen';
-      dep.disabled = !!you.pet;
+      dep.disabled = pets.length >= (you.maxPets || 2);
       if (dep.disabled) dep.style.opacity = 0.4;
       dep.onclick = () => handlers.petDeploy(i);
       const rel = document.createElement('button');
@@ -516,12 +578,20 @@ function renderInventory() {
     });
   }
 
-  // Skin ändern
-  const skinBtn = document.createElement('button');
-  skinBtn.textContent = '🎨 Skin ändern';
-  skinBtn.style.cssText = 'margin-top:10px;width:100%;font-size:12px;padding:6px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:5px';
-  skinBtn.onclick = () => handlers.outfit();
-  b.appendChild(skinBtn);
+  // Charakter-Menü öffnen (Outfits & Reittiere)
+  const charBtn = document.createElement('button');
+  charBtn.textContent = '🎭 Aussehen & Reittiere (Taste C)';
+  charBtn.style.cssText = 'margin-top:10px;width:100%;font-size:12px;padding:7px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:5px';
+  charBtn.onclick = () => openCharMenu();
+  b.appendChild(charBtn);
+}
+
+function mkMiniBtn(label, onClick) {
+  const btn = document.createElement('button');
+  btn.textContent = label;
+  btn.style.cssText = 'font-size:10px;padding:2px 6px;margin-left:3px;cursor:pointer;background:#33281a;border:1px solid #5a4326;color:#e8c165;border-radius:4px';
+  btn.onclick = onClick;
+  return btn;
 }
 
 // ---------------- Shop (Sortiment je Händler) ----------------

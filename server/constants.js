@@ -383,8 +383,44 @@ const SKULL_MS = 60000;
 function xpForLevel(lvl) { return Math.round(120 * Math.pow(lvl - 1, 2.1)); }
 function petXpForLevel(lvl) { return Math.round(80 * Math.pow(lvl - 1, 2.1)); }
 
+// ---------------- Outfits ----------------
+// Jeder Held kann sein Aussehen im Charakter-Menü (Taste C) ändern.
+// unlock: 'start' (immer) | {level} | {quest} | {gold} (kaufbar) | {item}
+// r = Render-Parameter für makeHumanoid (Client). skin/shirt/legs sind Farben.
+const OUTFITS = [
+  // ---- Grundfarben (von Anfang an) ----
+  { id: 'red',    name: 'Roter Recke',    unlock: 'start', r: { shirt: 0xc23b3b, legs: 0x4a3a2a } },
+  { id: 'blue',   name: 'Blaue Wache',    unlock: 'start', r: { shirt: 0x3b6cc2, legs: 0x2a3a5a } },
+  { id: 'green',  name: 'Grüner Jäger',   unlock: 'start', r: { shirt: 0x2fae4e, legs: 0x2a4a2a } },
+  { id: 'gold',   name: 'Goldene Wache',  unlock: 'start', r: { shirt: 0xd8a93a, legs: 0x6a5020 } },
+  { id: 'purple', name: 'Purpur-Magier',  unlock: 'start', r: { shirt: 0x8a3bc2, legs: 0x4a2a6a } },
+  { id: 'teal',   name: 'Türkis-Reisender', unlock: 'start', r: { shirt: 0x2fb5b5, legs: 0x2a5a5a } },
+  { id: 'pink',   name: 'Rosa Held',      unlock: 'start', r: { shirt: 0xd8558e, legs: 0x6a3050 } },
+  { id: 'white',  name: 'Weiße Robe',     unlock: 'start', r: { shirt: 0xe8e4da, legs: 0xa8a49a } },
+  { id: 'dark',   name: 'Schattengänger', unlock: 'start', r: { shirt: 0x37393f, legs: 0x24262c } },
+  { id: 'orange', name: 'Bronzekämpfer',  unlock: 'start', r: { shirt: 0xb05c22, legs: 0x6a3818 } },
+  { id: 'lime',   name: 'Waldgrün',       unlock: 'start', r: { shirt: 0x5c8a2a, legs: 0x3a5a1a } },
+  { id: 'brown',  name: 'Lederwams',      unlock: 'start', r: { shirt: 0x7a5230, legs: 0x4a3018 } },
+  // ---- 15 neue, freischaltbare Outfits (Kostüme + Farben) ----
+  { id: 'ranger',    name: '🏹 Waldläufer',      unlock: { level: 8 },  r: { shirt: 0x3a6a2e, legs: 0x2a4020, hat: 'hood', cape: true, capeColor: 0x2a4a1e, bowBack: true } },
+  { id: 'barbarian', name: '🪓 Barbar',          unlock: { level: 15 }, r: { skin: 0xd8a878, shirt: 0x7a3a1a, legs: 0x4a2a14, hat: 'none', shoulders: true } },
+  { id: 'desert',    name: '🏜 Wüstenwanderer',  unlock: { level: 22 }, r: { shirt: 0xd8c088, legs: 0xa88a50, hat: 'hood', cape: true, capeColor: 0xc8a860 } },
+  { id: 'pirate',    name: '🏴‍☠️ Pirat',          unlock: { gold: 3000 }, r: { shirt: 0x8a2020, legs: 0x2a2a2a, hat: 'feather' } },
+  { id: 'noble',     name: '👔 Edelmann',        unlock: { gold: 5000 }, r: { shirt: 0x2a3a6a, legs: 0x1a2a4a, cape: true, capeColor: 0x8a2040, plume: true } },
+  { id: 'assassin',  name: '🗡 Assassine',       unlock: { level: 30 }, r: { shirt: 0x1a1c22, legs: 0x14161a, hat: 'hood', cape: true, capeColor: 0x2a1030 } },
+  { id: 'mage_master', name: '🔮 Erzmagier',     unlock: { level: 40 }, r: { shirt: 0x3a2a6a, legs: 0x2a1a4a, hat: 'wizard', robe: true, staff: true } },
+  { id: 'ice_knight', name: '❄️ Eisritter',      unlock: { quest: 'bq_yeti' }, r: { shirt: 0xbfe0f0, legs: 0x7ab0d0, hat: 'helmet', cape: true, capeColor: 0x4a8ac0, shoulders: true, plume: true } },
+  { id: 'dragon_knight', name: '🐉 Drachenritter', unlock: { quest: 'bq_dragon' }, r: { shirt: 0x9a2818, legs: 0x5a1810, hat: 'helmet', cape: true, capeColor: 0xc84020, shoulders: true, plume: true } },
+  { id: 'necromancer', name: '💀 Nekromant',     unlock: { quest: 'bq_lich' }, r: { shirt: 0x1a2a1a, legs: 0x141a14, hat: 'wizard', robe: true, staff: true, horns: true } },
+  { id: 'blood_lord', name: '🧛 Blutfürst',      unlock: { quest: 'q_vampire' }, r: { skin: 0xd8ccc8, shirt: 0x2a1218, legs: 0x1a0e12, cape: true, capeColor: 0x8a1020, hat: 'none' } },
+  { id: 'forest_fae', name: '🧚 Waldfee',        unlock: { level: 18 }, r: { shirt: 0x6ac878, legs: 0x3a8a4a, cape: true, capeColor: 0x9ae8a8, hat: 'none' } },
+  { id: 'golden_hero', name: '✨ Goldener Held', unlock: { gold: 15000 }, r: { shirt: 0xf0c840, legs: 0xc89820, hat: 'helmet', cape: true, capeColor: 0xf0d060, shoulders: true, plume: true } },
+  { id: 'demon_hunter', name: '😈 Dämonenjäger', unlock: { item: 'demon_horn' }, r: { shirt: 0x3a1a2a, legs: 0x2a1420, hat: 'none', horns: true, cape: true, capeColor: 0x8a2040, shoulders: true } },
+  { id: 'titan_armor', name: '👑 Titanenrüstung', unlock: { item: 'titan_heart' }, r: { skin: 0xd8d0c0, shirt: 0x9aa0a8, legs: 0x6a7078, hat: 'helmet', cape: true, capeColor: 0xd8b040, shoulders: true, plume: true } },
+];
+
 module.exports = {
-  TILE, WALKABLE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS,
+  TILE, WALKABLE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS,
   SHOP_ITEMS, QUESTS, MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
   skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 };

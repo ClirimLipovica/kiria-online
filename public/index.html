@@ -189,6 +189,22 @@
     <div id="spellList"></div>
   </div>
 
+  <div id="charBox" class="panel" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:560px;max-height:76vh;overflow-y:auto;padding:16px 20px;display:none;z-index:21;scrollbar-width:thin">
+    <span class="x" id="charClose" style="position:absolute;top:8px;right:12px;cursor:pointer;color:#a89878;font-size:18px">✕</span>
+    <h3 style="margin:0 0 4px;color:var(--gold)">🎭 Charakter-Menü (C)</h3>
+    <div style="font-size:10.5px;color:#a89878;margin-bottom:10px">Wähle dein Aussehen und dein Reittier. Deine Figur ändert sich sofort. Neue Outfits schaltest du per Level, Quest, Item oder Kauf frei.</div>
+    <div style="display:flex;gap:16px">
+      <div style="flex:1">
+        <h3 style="margin:0 0 6px;color:#e8c165;font-size:13px">👕 Outfits</h3>
+        <div id="charOutfits" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <div style="flex:1">
+        <h3 style="margin:0 0 6px;color:#e8c165;font-size:13px">🐎 Reittiere</h3>
+        <div id="charMounts" style="display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="hotbar" class="panel"></div>
 
   <div id="chatBox">

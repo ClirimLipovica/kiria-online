@@ -13,7 +13,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { World3D } from './world3d.js';
-import { Entity, OUTFITS } from './entities.js';
+import { Entity, OUTFITS, setOutfitDefs } from './entities.js';
 import * as fx from './effects.js';
 import * as ui from './ui.js';
 
@@ -105,6 +105,7 @@ socket.on('welcome', (data) => {
   $('login').style.display = 'none';
 
   initThree();
+  setOutfitDefs(defs.OUTFITS || []); // Outfit-Definitionen für das Rendering
   world = new World3D(scene, data.world);
   // Beim Start alle umliegenden Chunks sofort bauen (danach 1/Frame)
   for (let i = 0; i < 60; i++) { if (!world.ensureChunks(you.x, you.y)) break; }
@@ -119,17 +120,19 @@ socket.on('welcome', (data) => {
     sell: (index) => socket.emit('sell', { index }),
     equip: (index) => socket.emit('equip', { index }),
     unequip: (slot) => socket.emit('unequip', { slot }),
-    dismissPet: () => socket.emit('dismissPet'),
-    petStash: () => socket.emit('petStash'),
+    dismissPet: (index) => socket.emit('dismissPet', { index }),
+    petStash: (index) => socket.emit('petStash', { index }),
     petDeploy: (index) => socket.emit('petDeploy', { index }),
     petRelease: (index) => socket.emit('petRelease', { index }),
+    petRename: (ref, name) => socket.emit('petRename', { ref, name }),
     use: (index) => socket.emit('use', { index }),
-    mount: (type) => socket.emit('mountToggle', { type }),
-    outfit: () => socket.emit('outfit', { outfit: ((you.outfit || 0) + 1) % OUTFITS.length }),
+    mount: (type) => socket.emit('selectMount', { type }),
+    outfit: (id) => socket.emit('selectOutfit', { outfit: id }),
     respawn: () => socket.emit('respawn'),
     questAccept: (id) => socket.emit('questAccept', { id }),
     questComplete: (id) => socket.emit('questComplete', { id }),
     target: (id) => setTarget(id),
+    unlockAll: (code) => socket.emit('unlockAll', { code }),
   }, you.vocation);
   ui.setYou(you);
   ui.initMinimapClick(
@@ -385,6 +388,10 @@ function handleEvent(ev) {
       if (ev.id === selfId && you) you.outfit = ev.outfit;
       break;
     }
+    case 'petName': {
+      if (e) { e.name = ev.name; e.redrawLabel(); }
+      break;
+    }
     case 'levelup': {
       if (!e) break;
       if (e.group.visible) {
@@ -492,6 +499,7 @@ function initInput() {
     if (k === 'l') { ui.toggleQuestLog(); return; }
     if (k === 'b') { ui.toggleBattleList(); return; }
     if (k === 'z') { ui.toggleSpellbook(); return; }
+    if (k === 'c') { ui.toggleCharMenu(); return; }
     if (k === 'm') { ui.toggleBigMap(self(), false, entities); return; }
     if (k === 'r') { socket.emit('mountToggle', { type: you && you.mounted ? null : (you.mounts && you.mounts[0]) }); return; }
     if (k === 'k') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }

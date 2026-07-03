@@ -8,10 +8,23 @@
 // ---------------------------------------------------------------
 const storage = require('./storage');
 const {
-  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS,
+  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, SHOP_ITEMS, QUESTS,
   MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
   skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 } = require('./constants');
+
+const OUTFIT_IDS = OUTFITS.map((o) => o.id);
+const ALL_MOUNTS = [...new Set(Object.values(ITEMS).filter((i) => i.kind === 'mount').map((i) => i.mount))];
+
+// Welche Outfits hat der Spieler frei? (Start + Level-erreicht + gekaufte/Quest in p.outfits)
+function isOutfitUnlocked(p, o) {
+  if (o.unlock === 'start') return true;
+  if (o.unlock.level) return p.level >= o.unlock.level;
+  return p.outfits.includes(o.id); // gold/quest/item werden in p.outfits gespeichert
+}
+function unlockedOutfitIds(p) {
+  return OUTFITS.filter((o) => isOutfitUnlocked(p, o)).map((o) => o.id);
+}
 const { generateWorld, isWalkable } = require('./world');
 
 const TICK_MS = 150;
@@ -108,6 +121,8 @@ function spawnMonster(type, home, silent = false) {
     type, x: pos.x, y: pos.y,
     hp: def.hp, maxHp: def.hp,
     home, targetId: null,
+    // Shiny: 4% Chance auf eine seltene Farbvariante (nicht bei Bossen)
+    shiny: !def.boss && Math.random() < SHINY_CHANCE,
     lastMove: 0, lastAtk: 0, lastRanged: 0,
     dead: false, respawnAt: 0,
     damageBy: {},
@@ -131,9 +146,10 @@ function initMonsters() {
 function publicMonster(m) {
   const def = MONSTERS[m.type];
   return {
-    id: m.id, type: m.type, name: def.name, x: m.x, y: m.y, hp: m.hp, maxHp: m.maxHp,
+    id: m.id, type: m.type, name: (m.shiny ? '✨ ' : '') + def.name, x: m.x, y: m.y, hp: m.hp, maxHp: m.maxHp,
     mv: def.moveMs, boss: def.boss ? true : undefined,
     worldBoss: def.worldBoss ? true : undefined,
+    shiny: m.shiny ? true : undefined,
   };
 }
 
@@ -146,20 +162,25 @@ function petStats(type, level) {
   };
 }
 
-function createPet(owner, type, level = 1, xp = 0, silent = false) {
+const MAX_ACTIVE_PETS = 2;    // so viele Tiere darf man gleichzeitig beschwören
+const SHINY_CHANCE = 0.04;    // 4% Chance auf ein glänzendes (andersfarbiges) Tier
+
+function createPet(owner, type, level = 1, xp = 0, silent = false, opts = {}) {
   const stats = petStats(type, level);
   const pos = findFreeNear(owner.x, owner.y, 3) || { x: owner.x, y: owner.y };
   const pet = {
     id: 'p' + (nextPetId++),
     type, level, xp,
-    name: MONSTERS[type].name,
+    name: opts.name || MONSTERS[type].name,
+    shiny: !!opts.shiny,
     x: pos.x, y: pos.y,
     hp: stats.maxHp, maxHp: stats.maxHp,
     ownerId: owner.id, ownerName: owner.name,
+    targetId: null, retargetAt: 0,
     lastMove: 0, lastAtk: 0, buffUntil: 0,
   };
   pets.set(pet.id, pet);
-  owner.pet = pet;
+  owner.pets.push(pet);
   if (!silent) events.push({ t: 'pet', pet: publicPet(pet) });
   dirtyPrivate.add(owner.id);
   return pet;
@@ -167,7 +188,7 @@ function createPet(owner, type, level = 1, xp = 0, silent = false) {
 
 function publicPet(p) {
   return {
-    id: p.id, type: p.type, name: p.name, level: p.level,
+    id: p.id, type: p.type, name: p.name, level: p.level, shiny: p.shiny,
     x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp,
     ownerId: p.ownerId, ownerName: p.ownerName,
   };
@@ -176,7 +197,10 @@ function publicPet(p) {
 function removePet(pet, deathEvent = true) {
   pets.delete(pet.id);
   const owner = players.get(pet.ownerId);
-  if (owner && owner.pet === pet) { owner.pet = null; dirtyPrivate.add(owner.id); }
+  if (owner && owner.pets) {
+    const i = owner.pets.indexOf(pet);
+    if (i >= 0) { owner.pets.splice(i, 1); dirtyPrivate.add(owner.id); }
+  }
   if (deathEvent) events.push({ t: 'die', id: pet.id });
 }
 
@@ -211,24 +235,25 @@ function givePetXp(pet, amount) {
   }
 }
 
-// Stall: aktives Tier deponieren
-function petStash(p) {
-  if (!p.pet) return info(p, 'Du hast kein aktives Tier.');
+// Stall: ein aktives Tier deponieren (index in p.pets, Standard 0)
+function petStash(p, index = 0) {
+  const pet = p.pets[index] || p.pets[0];
+  if (!pet) return info(p, 'Du hast kein aktives Tier.');
   if (p.petStable.length >= STABLE_MAX) return info(p, `Dein Stall ist voll (max. ${STABLE_MAX}).`);
-  p.petStable.push({ type: p.pet.type, level: p.pet.level, xp: p.pet.xp });
-  info(p, `${p.pet.name} wurde im Stall deponiert.`);
-  removePet(p.pet);
+  p.petStable.push({ type: pet.type, level: pet.level, xp: pet.xp, name: pet.name, shiny: pet.shiny });
+  info(p, `${pet.name} wurde im Stall untergebracht.`);
+  removePet(pet);
   dirtyPrivate.add(p.id);
 }
 
-// Stall: Tier einsetzen
+// Stall: Tier einsetzen (bis zu 2 gleichzeitig)
 function petDeploy(p, index) {
   const entry = p.petStable[index];
   if (!entry) return;
-  if (p.pet) return info(p, 'Du hast schon ein aktives Tier. Deponiere es zuerst.');
+  if (p.pets.length >= MAX_ACTIVE_PETS) return info(p, `Du kannst nur ${MAX_ACTIVE_PETS} Tiere gleichzeitig bei dir haben. Bring eins in den Stall.`);
   p.petStable.splice(index, 1);
-  createPet(p, entry.type, entry.level, entry.xp);
-  info(p, `${MONSTERS[entry.type].name} (Stufe ${entry.level}) ist wieder an deiner Seite!`);
+  createPet(p, entry.type, entry.level, entry.xp, false, { name: entry.name, shiny: entry.shiny });
+  info(p, `${entry.name || MONSTERS[entry.type].name} (Stufe ${entry.level}) ist wieder an deiner Seite!`);
   dirtyPrivate.add(p.id);
 }
 
@@ -236,14 +261,35 @@ function petRelease(p, index) {
   const entry = p.petStable[index];
   if (!entry) return;
   p.petStable.splice(index, 1);
-  info(p, `Du entlässt ${MONSTERS[entry.type].name} in die Freiheit.`);
+  info(p, `Du entlässt ${entry.name || MONSTERS[entry.type].name} in die Freiheit.`);
   dirtyPrivate.add(p.id);
 }
 
-function dismissPet(p) {
-  if (!p.pet) return;
-  info(p, `Du entlässt deinen ${p.pet.name} in die Freiheit.`);
-  removePet(p.pet);
+// aktives Tier freilassen (index, Standard das erste)
+function dismissPet(p, index = 0) {
+  const pet = p.pets[index] || p.pets[0];
+  if (!pet) return;
+  info(p, `Du entlässt ${pet.name} in die Freiheit.`);
+  removePet(pet);
+}
+
+// Aktives Tier oder Stall-Tier benennen
+function renamePet(p, ref, name) {
+  name = String(name || '').trim().replace(/[^A-Za-z0-9ÄÖÜäöüß _-]/g, '').slice(0, 16);
+  if (!name) return info(p, 'Bitte einen gültigen Namen eingeben (bis 16 Zeichen).');
+  if (typeof ref === 'string' && ref.startsWith('p')) {
+    const pet = p.pets.find((x) => x.id === ref);
+    if (!pet) return;
+    pet.name = name;
+    events.push({ t: 'petName', id: pet.id, name });
+    info(p, `Dein Tier heißt jetzt ${name}!`);
+  } else {
+    const entry = p.petStable[ref | 0];
+    if (!entry) return;
+    entry.name = name;
+    info(p, `Dein Stall-Tier heißt jetzt ${name}!`);
+  }
+  dirtyPrivate.add(p.id);
 }
 
 // ---------------- Spieler ----------------
@@ -286,11 +332,13 @@ function privatePlayer(p) {
     },
     skullMs: Math.max(0, p.skullUntil - now),
     torchLight: !!(p.eq.shield && ITEMS[p.eq.shield].light),
-    pet: p.pet ? {
-      type: p.pet.type, name: p.pet.name, level: p.pet.level,
-      hp: p.pet.hp, maxHp: p.pet.maxHp, xp: p.pet.xp, xpNext: petXpForLevel(p.pet.level + 1),
-    } : null,
+    pets: p.pets.map((pet) => ({
+      id: pet.id, type: pet.type, name: pet.name, level: pet.level, shiny: pet.shiny,
+      hp: pet.hp, maxHp: pet.maxHp, xp: pet.xp, xpNext: petXpForLevel(pet.level + 1),
+    })),
     petStable: p.petStable,
+    maxPets: MAX_ACTIVE_PETS,
+    unlockedOutfits: unlockedOutfitIds(p),
   };
 }
 
@@ -320,7 +368,7 @@ function createPlayer(socket, account) {
     accountKey: account.name.toLowerCase(),
     name: account.name,
     vocation: account.vocation,
-    outfit: account.outfit,
+    outfit: normalizeOutfit(account.outfit),
     x: save && save.x !== undefined ? save.x : spawn.x,
     y: save && save.y !== undefined ? save.y : spawn.y,
     level: save ? save.level : 1,
@@ -338,7 +386,8 @@ function createPlayer(socket, account) {
     },
     buffs: { atk: 0, def: 0, speed: 0, light: 0, regen: 0 },
     skullUntil: 0, skullMsgAt: 0,
-    pet: null,
+    pets: [],
+    outfits: save && save.outfits ? save.outfits : null, // freigeschaltete Outfits (lazy init unten)
     targetId: null, dead: false,
     nextMoveAt: 0, lastAtk: 0, potCd: 0, spellCds: {}, lastChat: 0,
     socket,
@@ -352,10 +401,16 @@ function createPlayer(socket, account) {
     const alt = findFreeNear(p.x, p.y, 6) || spawn;
     p.x = alt.x; p.y = alt.y;
   }
+  // Freigeschaltete Outfits: mindestens die Standard-Farben (Index 0–11)
+  if (!Array.isArray(p.outfits)) p.outfits = [];
   players.set(p.id, p);
   occ.set(key(p.x, p.y), p.id);
-  if (save && save.pet && account.vocation === 'tamer') {
-    createPet(p, save.pet.type, save.pet.level, save.pet.xp || 0, true);
+  // Gespeicherte Tiere wiederbeleben (neues Array-Format + altes Einzel-Format)
+  if (account.vocation === 'tamer' && save) {
+    const list = Array.isArray(save.pets) ? save.pets : (save.pet ? [save.pet] : []);
+    for (const sp of list.slice(0, MAX_ACTIVE_PETS)) {
+      createPet(p, sp.type, sp.level, sp.xp || 0, true, { name: sp.name, shiny: sp.shiny });
+    }
   }
   return p;
 }
@@ -365,14 +420,14 @@ function saveData(p) {
     mapV: MAP_VERSION,
     x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold, food: p.food,
     hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq, quests: p.quests,
-    mounts: p.mounts, petStable: p.petStable, skills: p.skills,
-    pet: p.pet ? { type: p.pet.type, level: p.pet.level, xp: p.pet.xp } : null,
+    mounts: p.mounts, petStable: p.petStable, skills: p.skills, outfits: p.outfits,
+    pets: p.pets.map((pet) => ({ type: pet.type, level: pet.level, xp: pet.xp, name: pet.name, shiny: pet.shiny })),
   };
 }
 
 function removePlayer(p) {
   removeFromMap(p);
-  if (p.pet) removePet(p.pet);
+  for (const pet of [...p.pets]) removePet(pet);
   players.delete(p.id);
   for (const m of monsters.values()) if (m.targetId === p.id) m.targetId = null;
   for (const o of players.values()) if (o.targetId === p.id) o.targetId = null;
@@ -472,7 +527,7 @@ function respawnPlayer(p) {
   dirtyHp.set(p.id, [p.hp, p.maxHp]);
   dirtyPrivate.add(p.id);
   events.push({ t: 'respawn', id: p.id });
-  if (p.pet) placePet(p.pet, spawn.x, spawn.y);
+  for (const pet of p.pets) placePet(pet, spawn.x, spawn.y);
 }
 
 function damageMonster(m, dmg, attacker, kind, aggroId) {
@@ -532,7 +587,7 @@ function killMonster(m, killer) {
   for (const [p, share] of shares) {
     const xp = Math.max(1, Math.round(def.xp * share));
     giveXp(p, xp);
-    if (p.pet) givePetXp(p.pet, xp);
+    for (const pet of p.pets) givePetXp(pet, xp);
     for (const [qid, state] of Object.entries(p.quests)) {
       const q = QUESTS[qid];
       if (!q || state.s !== 'active' || q.target !== m.type || state.n >= q.count) continue;
@@ -761,12 +816,70 @@ function setTarget(p, id) {
   p.targetId = id && (monsters.has(id) || players.has(id) || pets.has(id)) ? id : null;
 }
 
-function setOutfit(p, outfit) {
-  outfit = Math.abs(parseInt(outfit, 10) || 0) % 12;
-  p.outfit = outfit;
+// altes Format (Zahl-Farbindex) → Outfit-ID
+function normalizeOutfit(v) {
+  if (typeof v === 'string' && OUTFIT_IDS.includes(v)) return v;
+  const n = Math.abs(parseInt(v, 10) || 0) % 12;
+  return OUTFIT_IDS[n] || 'red';
+}
+
+// Outfit auswählen (nur ein freigeschaltetes)
+function selectOutfit(p, outfitId) {
+  outfitId = String(outfitId);
+  const o = OUTFITS.find((x) => x.id === outfitId);
+  if (!o) return;
+  if (!isOutfitUnlocked(p, o)) {
+    // per Gold kaufbar? dann direkt freischalten
+    if (o.unlock.gold) {
+      if (p.gold < o.unlock.gold) return info(p, `${o.name} kostet ${o.unlock.gold} Gold – so viel hast du nicht.`);
+      p.gold -= o.unlock.gold;
+      if (!p.outfits.includes(o.id)) p.outfits.push(o.id);
+      info(p, `🎉 Outfit „${o.name}" gekauft!`);
+    } else {
+      return info(p, `„${o.name}" musst du erst freischalten.`);
+    }
+  }
+  p.outfit = outfitId;
   const acc = accounts[p.accountKey];
-  if (acc) acc.outfit = outfit;
-  events.push({ t: 'outfit', id: p.id, outfit });
+  if (acc) acc.outfit = outfitId;
+  events.push({ t: 'outfit', id: p.id, outfit: outfitId });
+  dirtyPrivate.add(p.id);
+}
+
+// Ein bestimmtes Reittier aufsatteln (oder null = absteigen)
+function selectMount(p, type) {
+  if (p.dead) return;
+  if (!type || type === 'none') {
+    p.mounted = null;
+    events.push({ t: 'mount', id: p.id, mount: null });
+    dirtyPrivate.add(p.id);
+    return;
+  }
+  type = String(type);
+  if (!p.mounts.includes(type)) return info(p, 'Dieses Reittier besitzt du nicht.');
+  p.mounted = type;
+  events.push({ t: 'mount', id: p.id, mount: type });
+  dirtyPrivate.add(p.id);
+}
+
+// Test-/Admin-Befehl: schaltet alles frei (Level 500, alle Mounts & Outfits).
+// Funktioniert nur mit dem richtigen Code (ENV UNLOCK_CODE, Standard "kiria500").
+function unlockAll(p, code) {
+  const secret = process.env.UNLOCK_CODE || 'kiria500';
+  if (code !== secret) return info(p, 'Falscher Code.');
+  const voc = VOCATIONS[p.vocation];
+  p.level = 500;
+  p.xp = xpForLevel(500);
+  p.maxHp = voc.hp + voc.hpL * 499; p.hp = p.maxHp;
+  p.maxMp = voc.mp + voc.mpL * 499; p.mp = p.maxMp;
+  p.gold = 9999999;
+  p.skills = { atk: { lvl: 130, pts: 0 }, shield: { lvl: 130, pts: 0 }, magic: { lvl: 130, pts: 0 } };
+  p.mounts = [...ALL_MOUNTS];
+  p.outfits = OUTFITS.filter((o) => o.unlock !== 'start' && !o.unlock.level).map((o) => o.id);
+  recalcSpeed(p);
+  dirtyHp.set(p.id, [p.hp, p.maxHp]);
+  events.push({ t: 'levelup', id: p.id, level: p.level });
+  info(p, '⚡ ADMIN: Level 500, alle Reittiere und Outfits freigeschaltet! Öffne das Charakter-Menü (Taste C).');
   dirtyPrivate.add(p.id);
 }
 
@@ -802,9 +915,20 @@ function useItem(p, invIndex) {
     p.inv.items.splice(invIndex, 1);
     p.mounts.push(item.mount);
     const name = MONSTERS[item.mount] ? MONSTERS[item.mount].name : 'Pferd';
-    info(p, `🐎 Du kannst jetzt ${name} reiten! (Taste R oder Inventar)`);
+    info(p, `🐎 Du kannst jetzt ${name} reiten! (Taste R oder Charakter-Menü C)`);
     events.push({ t: 'fx', kind: 'tame', at: [p.x, p.y] });
     dirtyPrivate.add(p.id);
+  } else {
+    // Schaltet dieses Item ein Outfit frei? (z. B. Titanenherz, Dämonenhorn)
+    const o = OUTFITS.find((x) => x.unlock.item === itemId);
+    if (o) {
+      if (p.outfits.includes(o.id)) return info(p, 'Dieses Outfit hast du schon.');
+      p.inv.items.splice(invIndex, 1);
+      p.outfits.push(o.id);
+      info(p, `🎽 Outfit „${o.name}" freigeschaltet! (Charakter-Menü, Taste C)`);
+      events.push({ t: 'fx', kind: 'nova', at: [p.x, p.y] });
+      dirtyPrivate.add(p.id);
+    }
   }
 }
 
@@ -911,7 +1035,7 @@ function castSpell(p, spellId) {
     if (!m || m.dead) return info(p, 'Wähle zuerst ein Tier als Ziel.');
     const def = MONSTERS[m.type];
     if (!def.tame) return info(p, `${def.name} kann nicht gezähmt werden.`);
-    if (p.pet) return info(p, 'Du hast schon ein aktives Tier. Deponiere es im Stall (Inventar).');
+    if (p.pets.length >= MAX_ACTIVE_PETS) return info(p, `Du hast schon ${MAX_ACTIVE_PETS} Tiere. Bring eins in den Stall (Inventar).`);
     if (cheb(p, m) > spell.range) return info(p, 'Geh näher heran.');
     // Starke Bestien brauchen ein hohes ✨ Magie-Level!
     const ml = p.skills.magic.lvl;
@@ -928,27 +1052,34 @@ function castSpell(p, spellId) {
       events.push({ t: 'die', id: m.id });
       // Höheres Magie-Level = das Tier startet gleich stärker!
       const startLvl = tameStartLevel(ml);
-      const pet = createPet(p, m.type, startLvl);
-      events.push({ t: 'fx', kind: 'tame', at: [pet.x, pet.y] });
-      info(p, `🐾 Du hast ${def.name} gezähmt${startLvl > 1 ? ` – dank Magie-Level ${ml} startet es auf Stufe ${startLvl}!` : '! Es kämpft jetzt für dich.'}`);
+      const shiny = Math.random() < SHINY_CHANCE;
+      const pet = createPet(p, m.type, startLvl, 0, false, { shiny });
+      events.push({ t: 'fx', kind: shiny ? 'nova' : 'tame', at: [pet.x, pet.y] });
+      info(p, shiny
+        ? `✨🐾 UNGLAUBLICH! Du hast ein GLÄNZENDES ${def.name} gezähmt – eine seltene Farbe! (Stufe ${startLvl})`
+        : `🐾 Du hast ${def.name} gezähmt${startLvl > 1 ? ` – dank Magie-Level ${ml} startet es auf Stufe ${startLvl}!` : '! Es kämpft jetzt für dich.'}`);
       p.targetId = null;
     } else {
       info(p, `${def.name} hat sich losgerissen! Versuch es nochmal.`);
     }
 
   } else if (spell.kind === 'petheal') {
-    if (!p.pet) return info(p, 'Du hast kein Tier.');
+    if (!p.pets.length) return info(p, 'Du hast kein Tier.');
     const heal = Math.round((30 + p.level * 5) * spell.power);
-    p.pet.hp = Math.min(p.pet.maxHp, p.pet.hp + heal);
-    events.push({ t: 'heal', id: p.pet.id, amount: heal });
-    dirtyHp.set(p.pet.id, [p.pet.hp, p.pet.maxHp]);
+    for (const pet of p.pets) {
+      pet.hp = Math.min(pet.maxHp, pet.hp + heal);
+      events.push({ t: 'heal', id: pet.id, amount: heal });
+      dirtyHp.set(pet.id, [pet.hp, pet.maxHp]);
+    }
     dirtyPrivate.add(p.id);
 
   } else if (spell.kind === 'petbuff') {
-    if (!p.pet) return info(p, 'Du hast kein Tier.');
-    p.pet.buffUntil = now + spell.dur;
-    events.push({ t: 'fx', kind: 'buff', at: [p.pet.x, p.pet.y], style: 'atk' });
-    info(p, `🐾 Dein ${p.pet.name} ist wild entschlossen!`);
+    if (!p.pets.length) return info(p, 'Du hast kein Tier.');
+    for (const pet of p.pets) {
+      pet.buffUntil = now + spell.dur;
+      events.push({ t: 'fx', kind: 'buff', at: [pet.x, pet.y], style: 'atk' });
+    }
+    info(p, `🐾 Deine Tiere sind wild entschlossen!`);
   }
 
   p.mp -= spell.mana;
@@ -1080,6 +1211,13 @@ function questComplete(p, qid) {
   info(p, `🏆 Quest „${q.name}" abgeschlossen! Belohnung: ${rewards.join(', ')}`);
   events.push({ t: 'fx', kind: 'buff', at: [p.x, p.y], style: 'atk' });
   giveXp(p, q.reward.xp);
+  // Schaltet diese Quest ein Outfit frei?
+  for (const o of OUTFITS) {
+    if (o.unlock.quest === qid && !p.outfits.includes(o.id)) {
+      p.outfits.push(o.id);
+      info(p, `🎽 Neues Outfit freigeschaltet: „${o.name}"! (Charakter-Menü, Taste C)`);
+    }
+  }
   dirtyPrivate.add(p.id);
 }
 
@@ -1321,17 +1459,58 @@ function monsterAI(m, now) {
 }
 
 // ---------------- Tier-KI ----------------
+// Das Tier sucht sich SELBST ein Ziel: es unterstützt das Ziel seines
+// Besitzers, verteidigt sich und den Besitzer gegen angreifende Monster
+// und schlägt aggressive Monster in der Nähe – ohne dass man es lenkt.
+function petAcquireTarget(pet, owner, now) {
+  // Aktuelles Ziel behalten, solange gültig und in Reichweite
+  if (pet.targetId) {
+    const cur = monsters.get(pet.targetId) || players.get(pet.targetId) || pets.get(pet.targetId);
+    if (cur && !cur.dead && !inTown(cur.x, cur.y) && cheb(pet, cur) <= 11) return pet.targetId;
+    pet.targetId = null;
+  }
+  if (now < pet.retargetAt) return null;
+  pet.retargetAt = now + 400;
+  if (owner.dead || inTown(pet.x, pet.y)) return null;
+
+  // 1. Das aktive Ziel des Besitzers unterstützen (auch feindl. Spieler/Tier)
+  if (owner.targetId) {
+    const om = monsters.get(owner.targetId);
+    const oe = players.get(owner.targetId);
+    const op = pets.get(owner.targetId);
+    if (om && !om.dead && !inTown(om.x, om.y)) { pet.targetId = om.id; return om.id; }
+    if (oe && !oe.dead && oe.id !== owner.id && !inTown(oe.x, oe.y)) { pet.targetId = oe.id; return oe.id; }
+    if (op && op.ownerId !== owner.id && !inTown(op.x, op.y)) { pet.targetId = op.id; return op.id; }
+  }
+
+  // 2. Selbstständig: bevorzugt Monster, die Besitzer oder Tier angreifen,
+  //    sonst ein aggressives Monster nahe beim Besitzer
+  let best = null, bestScore = Infinity;
+  for (const m of monsters.values()) {
+    if (m.dead || inTown(m.x, m.y)) continue;
+    const dPet = cheb(pet, m);
+    if (dPet > 12) continue;
+    const threatens = m.targetId === owner.id || pet.ownerId === (m.targetId && pets.get(m.targetId) ? pets.get(m.targetId).ownerId : null);
+    const dOwner = cheb(owner, m);
+    if (!threatens && dOwner > 8) continue; // sonst nur im Umkreis des Besitzers
+    const score = dPet - (threatens ? 100 : 0);
+    if (score < bestScore) { bestScore = score; best = m; }
+  }
+  if (best) { pet.targetId = best.id; return best.id; }
+  return null;
+}
+
 function petAI(pet, now) {
   const owner = players.get(pet.ownerId);
   if (!owner) { removePet(pet); return; }
 
-  // Ziel des Besitzers: Monster, feindlicher Spieler (PvP!) oder dessen Tier
+  const targetId = petAcquireTarget(pet, owner, now);
   let tgt = null, kind = null;
-  if (owner.targetId && !owner.dead) {
-    const m = monsters.get(owner.targetId);
-    const enemy = players.get(owner.targetId);
-    const enemyPet = pets.get(owner.targetId);
-    if (m && !m.dead && !inTown(owner.x, owner.y)) { tgt = m; kind = 'monster'; }
+  if (targetId) {
+    const m = monsters.get(targetId);
+    const enemy = players.get(targetId);
+    const enemyPet = pets.get(targetId);
+    if (m && !m.dead) { tgt = m; kind = 'monster'; }
     else if (enemy && !enemy.dead && !inTown(enemy.x, enemy.y) && !inTown(pet.x, pet.y)) { tgt = enemy; kind = 'player'; }
     else if (enemyPet && enemyPet.ownerId !== owner.id && !inTown(enemyPet.x, enemyPet.y) && !inTown(pet.x, pet.y)) { tgt = enemyPet; kind = 'pet'; }
   }
@@ -1446,6 +1625,7 @@ function tick() {
         const pos = findFreeNear(m.home.x, m.home.y, m.home.r, m.home.rMin || 0, true);
         if (pos) {
           m.dead = false; m.hp = def.hp;
+          m.shiny = !def.boss && Math.random() < SHINY_CHANCE; // beim Respawn neu würfeln
           m.damageBy = {};
           m.path = null; m.blockedSince = 0; m.lastCombatAt = 0; m.retargetAt = 0;
           m.x = pos.x; m.y = pos.y;
@@ -1581,9 +1761,10 @@ module.exports = {
   accountsReady: false,
   start, saveAccounts, createPlayer, removePlayer, respawnPlayer,
   publicPlayer, privatePlayer, publicMonster, publicPet, publicCorpse, saveData,
-  tryMove, setTarget, setOutfit, castSpell, usePotion, buyItem, sellItem,
+  tryMove, setTarget, castSpell, usePotion, buyItem, sellItem,
   equipItem, unequipItem, useItem, lootCorpse, mountToggle,
-  dismissPet, petStash, petDeploy, petRelease, chat, questAccept, questComplete,
+  dismissPet, petStash, petDeploy, petRelease, renamePet, chat, questAccept, questComplete,
+  selectMount, selectOutfit, unlockAll,
   // für Tests:
   updateBosses, titanWindowOpen, bossStates, worldBoss,
 };

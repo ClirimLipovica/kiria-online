@@ -10,6 +10,11 @@ export const OUTFITS = [
   0xd8558e, 0xe8e4da, 0x37393f, 0xb05c22, 0x5c8a2a, 0x7a5230,
 ];
 
+// Outfit-Definitionen vom Server (defs.OUTFITS) – von main.js gesetzt
+let OUTFIT_DEFS = [];
+export function setOutfitDefs(list) { OUTFIT_DEFS = list || []; }
+export function getOutfitDefs() { return OUTFIT_DEFS; }
+
 function box(w, h, d, colorOrMat) {
   const mat = colorOrMat instanceof THREE.Material
     ? colorOrMat
@@ -607,11 +612,33 @@ export function makeMonsterVisual(type) {
 }
 
 function makePlayerVisual(vocation, outfit) {
-  const shirt = OUTFITS[outfit % OUTFITS.length];
-  if (vocation === 'knight')   return makeHumanoid({ shirt, hat: 'helmet', plume: true, shoulders: true, cape: true });
-  if (vocation === 'sorcerer') return makeHumanoid({ shirt, hat: 'wizard', robe: true, staff: true });
-  if (vocation === 'tamer')    return makeHumanoid({ shirt, hat: 'feather', cape: true, bird: true });
-  return makeHumanoid({ shirt, hat: 'hood', cape: true, bowBack: true });
+  const def = OUTFIT_DEFS.find((o) => o.id === outfit);
+  const r = def && def.r ? { ...def.r } : { shirt: OUTFITS[(typeof outfit === 'number' ? outfit : 1) % OUTFITS.length] };
+  // Basis-Outfit (nur Farbe): den typischen Berufs-Look ergänzen
+  if (r.hat === undefined) {
+    if (vocation === 'knight') { r.hat = 'helmet'; r.plume = true; r.shoulders = true; r.cape = true; }
+    else if (vocation === 'sorcerer') { r.hat = 'wizard'; r.robe = true; r.staff = true; }
+    else if (vocation === 'tamer') { r.hat = 'feather'; r.cape = true; r.bird = true; }
+    else { r.hat = 'hood'; r.cape = true; r.bowBack = true; }
+  }
+  return makeHumanoid(r);
+}
+
+// Baut nur das Outfit-Modell (für die Menü-Vorschau)
+export function buildOutfitPreview(vocation, outfitId) {
+  return makePlayerVisual(vocation, outfitId);
+}
+
+// Shiny: alle Farben um einen halben Farbkreis verschieben (seltene Variante)
+function applyShiny(obj) {
+  const hsl = {};
+  obj.traverse((o) => {
+    if (o.material && o.material.color && !o.material.map) {
+      o.material = o.material.clone();
+      o.material.color.getHSL(hsl);
+      o.material.color.setHSL((hsl.h + 0.48) % 1, Math.min(1, hsl.s * 1.25 + 0.15), Math.min(0.85, hsl.l + 0.06));
+    }
+  });
 }
 
 function makeNpcVisual() {
@@ -732,6 +759,7 @@ export class Entity {
   constructor(data, kind, world) {
     this.id = data.id;
     this.kind = kind; // 'player' | 'monster' | 'npc' | 'pet' | 'corpse'
+    this.vocation = data.vocation || 'knight';
     this.name = data.name;
     this.type = data.type || null;
     this.level = data.level || null;
@@ -767,17 +795,20 @@ export class Entity {
       this.labelColor = '#e8c165';
     } else if (kind === 'pet') {
       visual = makeMonsterVisual(data.type);
-      this.labelColor = '#7ee8e0';
+      if (data.shiny) applyShiny(visual);
+      this.labelColor = data.shiny ? '#ffd86a' : '#7ee8e0';
     } else if (kind === 'corpse') {
       visual = makeCorpseVisual();
       this.labelColor = '#d8c268';
       this.name = '💰 ' + (data.name || 'Beute');
     } else {
       visual = makeMonsterVisual(data.type);
-      this.labelColor = data.boss ? '#ffd700' : '#ff8a7a';
+      if (data.shiny) applyShiny(visual);
+      this.labelColor = data.boss ? '#ffd700' : data.shiny ? '#ffd86a' : '#ff8a7a';
     }
     this.boss = !!data.boss;
     this.worldBoss = !!data.worldBoss;
+    this.shiny = !!data.shiny;
     this.visual = visual;
     this.group.add(visual);
     this.labelY = this.boss ? 3.4 : TALL_TYPES.has(data.type) ? 2.2 : kind === 'corpse' ? 0.7 : 1.5;
@@ -912,10 +943,15 @@ export class Entity {
   }
 
   setOutfit(outfit) {
-    const mat = this.visual.userData.outfitMat;
-    if (mat) mat.color.setHex(OUTFITS[outfit % OUTFITS.length]);
-    const capeMat = this.visual.userData.anim && this.visual.userData.anim.capeMat;
-    if (capeMat) capeMat.color.setHex(OUTFITS[outfit % OUTFITS.length]);
+    // Outfit kann komplett anders aussehen → Modell neu bauen
+    const wasMounted = this.mountType;
+    if (this.mountG) { this.group.remove(this.mountG); this.mountG = null; }
+    this.group.remove(this.visual);
+    this.visual = makePlayerVisual(this.vocation, outfit);
+    this.visual.rotation.y = this.facing;
+    this.visual.traverse((o) => { o.userData.entityId = this.id; });
+    this.group.add(this.visual);
+    if (wasMounted) this.setMount(wasMounted);
   }
 
   // Aufsitzen/Absteigen: Mount-Modell unter der Figur

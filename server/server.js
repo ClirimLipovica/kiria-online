@@ -10,7 +10,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { Server } = require('socket.io');
 
-const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, MONSTERS, SHOP_ITEMS, QUESTS } = require('./constants');
+const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, MONSTERS, SHOP_ITEMS, QUESTS } = require('./constants');
 
 // Nur die Namen der Monster an den Client geben (für Stall, Mounts usw.)
 const MONSTER_NAMES = Object.fromEntries(Object.entries(MONSTERS).map(([k, v]) => [k, v.name]));
@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
           fountains: w.fountains,
           farm: w.farm,
         },
-        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, SHOP_ITEMS, QUESTS, MONSTER_NAMES },
+        defs: { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, SHOP_ITEMS, QUESTS, MONSTER_NAMES },
         you: game.privatePlayer(player),
         players: [...game.players.values()].filter((p) => p.id !== player.id).map(game.publicPlayer),
         monsters: [...game.monsters.values()].filter((m) => !m.dead).map(game.publicMonster),
@@ -116,11 +116,15 @@ io.on('connection', (socket) => {
   socket.on('sell', (d) => { if (player && d) game.sellItem(player, parseInt(d.index, 10)); });
   socket.on('equip', (d) => { if (player && d) game.equipItem(player, parseInt(d.index, 10)); });
   socket.on('unequip', (d) => { if (player && d) game.unequipItem(player, String(d.slot)); });
-  socket.on('outfit', (d) => { if (player && d) game.setOutfit(player, d.outfit); });
-  socket.on('dismissPet', () => { if (player) game.dismissPet(player); });
-  socket.on('petStash', () => { if (player) game.petStash(player); });
+  socket.on('outfit', (d) => { if (player && d) game.selectOutfit(player, d.outfit); });
+  socket.on('dismissPet', (d) => { if (player) game.dismissPet(player, d ? parseInt(d.index, 10) || 0 : 0); });
+  socket.on('petStash', (d) => { if (player) game.petStash(player, d ? parseInt(d.index, 10) || 0 : 0); });
   socket.on('petDeploy', (d) => { if (player && d) game.petDeploy(player, parseInt(d.index, 10)); });
   socket.on('petRelease', (d) => { if (player && d) game.petRelease(player, parseInt(d.index, 10)); });
+  socket.on('petRename', (d) => { if (player && d) game.renamePet(player, d.ref, d.name); });
+  socket.on('selectMount', (d) => { if (player && d) game.selectMount(player, d.type); });
+  socket.on('selectOutfit', (d) => { if (player && d) game.selectOutfit(player, d.outfit); });
+  socket.on('unlockAll', (d) => { if (player && d) game.unlockAll(player, String(d.code || '')); });
   socket.on('use', (d) => { if (player && d) game.useItem(player, parseInt(d.index, 10)); });
   socket.on('loot', (d) => { if (player && d) game.lootCorpse(player, String(d.id)); });
   socket.on('mountToggle', (d) => { if (player) game.mountToggle(player, d ? d.type : null); });
