@@ -1,30 +1,23 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Hauptmodul (v6)
+// Kiria Online 3D – Hauptmodul (v9)
 // Netzwerk, Rendering mit Bloom, drehbare Kamera (Q/E),
-// 8-Richtungs-Steuerung (diagonal!), Wegfindung, Quests,
-// Tiere, NPC-Dialoge und die Spielschleife.
+// 8-Richtungs-Steuerung (diagonal!), Wegfindung, Wegpunkte,
+// Quests, Tiere, NPC-Dialoge und die Spielschleife.
+// Flüssige Bewegung: Figuren interpolieren mit dem ECHTEN
+// Netzwerk-Takt statt mit festen Tabellenwerten.
 // ---------------------------------------------------------------
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { World3D } from './world3d.js';
 import { Entity, OUTFITS } from './entities.js';
 import * as fx from './effects.js';
 import * as ui from './ui.js';
 
 const socket = io();
-
-const MONSTER_MOVE_MS = {
-  bat: 420, rat: 600, crab: 700, snake: 650, boar: 520, spider: 460,
-  wolf: 430, goblin: 480, bandit: 480, scorpion: 500, orc: 520,
-  troll: 580, ghost: 450, skeleton: 560, zombie: 720, hunter: 480,
-  bear: 540, lizardman: 500, dark_elf: 460, ghoul: 500, harpy: 400,
-  orc_berserker: 460, banshee: 460, werewolf: 380, mummy: 620,
-  giant_spider: 420, minotaur: 500, ogre: 580, cyclops: 580,
-  vampire: 440, golem: 700, dark_knight: 480, yeti: 520,
-  fire_elemental: 500, wyrm: 480, dragon: 500, lich: 550, demon: 500,
-};
 
 const FX_COLORS = {
   flam: 0xff7722, vis: 0x88ccff, san: 0xffee88,
@@ -138,7 +131,14 @@ socket.on('welcome', (data) => {
     target: (id) => setTarget(id),
   }, you.vocation);
   ui.setYou(you);
-  ui.initMinimapClick((tx, ty) => walkTowards(tx, ty));
+  ui.initMinimapClick(
+    (tx, ty) => walkTowards(tx, ty),
+    // Klick auf die große Karte: Wegpunkt setzen (Fahne auf der Minimap)
+    (tx, ty) => {
+      ui.setWaypoint(tx, ty);
+      ui.chatMsg('', `🚩 Wegpunkt gesetzt! Folge der Fahne auf der Minimap.`, 'info');
+    },
+  );
 
   addEntity(data.you, 'player');
   for (const p of data.players) addEntity(p, 'player');
@@ -157,7 +157,7 @@ socket.on('welcome', (data) => {
   initInput();
   requestAnimationFrame(loop);
 
-  window.KIRIA = { entities, npcData, camera, self: () => entities.get(selfId) };
+  window.KIRIA = { entities, npcData, camera, world, self: () => entities.get(selfId) };
 });
 
 function initThree() {
@@ -175,8 +175,29 @@ function initThree() {
 
   composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.55, 0.85);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.6, 0.82);
   composer.addPass(bloom);
+
+  // Farb-Grading + Vignette: mehr Sättigung, sanfter Kontrast und ein
+  // dunkler Bildrand – das gibt den modernen "Cinematic"-Look.
+  const gradePass = new ShaderPass({
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: `varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        c.rgb = mix(vec3(l), c.rgb, 1.22);          // Sättigung
+        c.rgb = (c.rgb - 0.5) * 1.07 + 0.5;         // Kontrast
+        c.rgb *= vec3(1.02, 1.0, 0.985);            // warmer Stich
+        float d = distance(vUv, vec2(0.5));
+        c.rgb *= 0.78 + 0.26 * smoothstep(0.85, 0.35, d); // Vignette
+        gl_FragColor = c;
+      }`,
+  });
+  composer.addPass(gradePass);
+  composer.addPass(new OutputPass()); // Tonemapping + sRGB-Ausgabe
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -190,8 +211,9 @@ function initThree() {
 function addEntity(data, kind) {
   removeEntity(data.id);
   const e = new Entity(data, kind, world);
-  if (kind === 'monster') e.moveMs = MONSTER_MOVE_MS[data.type] || 550;
+  if (kind === 'monster') e.moveMs = data.mv || 550;
   if (kind === 'pet') e.moveMs = 400;
+  if (kind === 'player') e.moveMs = 300;
   entities.set(data.id, e);
   scene.add(e.group);
   return e;
@@ -270,6 +292,7 @@ socket.on('info', (d) => {
 });
 
 socket.on('tick', (data) => {
+  const nowP = performance.now();
   for (const [id, x, y] of data.m) {
     const e = entities.get(id);
     if (!e) continue;
@@ -277,7 +300,13 @@ socket.on('tick', (data) => {
       const match = (e.tx === x && e.ty === y) || predicted.some(([px, py]) => px === x && py === y);
       if (!match) { e.snapTo(x, y); pathQueue = []; }
     } else {
-      e.walkTo(x, y, e.kind === 'monster' || e.kind === 'pet' ? e.moveMs : 300);
+      // Flüssig: Dauer = echter Abstand zwischen zwei Bewegungspaketen.
+      // Nach längerem Stillstand fällt sie auf das Grundtempo zurück.
+      const base = e.moveMs || 300;
+      const gap = nowP - (e.lastNetMove || 0);
+      e.lastNetMove = nowP;
+      const dur = gap < base * 2.2 ? Math.max(110, Math.min(gap, base * 1.7)) : base;
+      e.walkTo(x, y, dur * 1.05, true);
     }
   }
   for (const [id, hp, maxHp] of data.hp) {
@@ -462,7 +491,7 @@ function initInput() {
     if (k === 'l') { ui.toggleQuestLog(); return; }
     if (k === 'b') { ui.toggleBattleList(); return; }
     if (k === 'z') { ui.toggleSpellbook(); return; }
-    if (k === 'm') { ui.toggleBigMap(self()); return; }
+    if (k === 'm') { ui.toggleBigMap(self(), false, entities); return; }
     if (k === 'r') { socket.emit('mountToggle', { type: you && you.mounted ? null : (you.mounts && you.mounts[0]) }); return; }
     if (k === 'k') { fx.toggleMute(); ui.chatMsg('', 'Sound umgeschaltet.', 'info'); return; }
     if (k === 'q') { camYawTarget += Math.PI / 4; return; }
@@ -670,6 +699,12 @@ function loop(now) {
       updateVisibility();
       world.updateRoofs(me.tx, me.ty);
       ui.updateMinimap(entities, selfId);
+      // Wegpunkt erreicht?
+      const wp = ui.getWaypoint();
+      if (wp && Math.max(Math.abs(me.tx - wp.x), Math.abs(me.ty - wp.y)) <= 3) {
+        ui.clearWaypoint();
+        ui.chatMsg('', '🚩 Wegpunkt erreicht!', 'info');
+      }
       if (ui.isBattleListOpen()) ui.renderBattleList(entities, selfId, targetId);
       let n = 0;
       for (const e of entities.values()) if (e.kind === 'player') n++;

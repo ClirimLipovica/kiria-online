@@ -34,6 +34,7 @@ function itemStat(item) {
   if (item.atk) return `Atk ${item.atk}`;
   if (item.kind === 'food') return `+${Math.floor(item.food / 60)} Min. satt`;
   if (item.kind === 'mount') return 'Mount';
+  if (item.kind === 'loot') return `💰 Verkaufsware, ${Math.floor(item.price / 2)}g`;
   if (item.def !== undefined) return `Def ${item.def}${item.speed ? ', +Tempo' : ''}${item.light ? ', Licht' : ''}`;
   if (item.heal) return `+${item.heal} HP`;
   if (item.mana) return `+${item.mana} MP`;
@@ -325,11 +326,21 @@ function renderInventory() {
   const b = $('invBox');
   if (b.style.display !== 'block' || !you) return;
 
+  const skillBar = (label, s, hint) => {
+    if (!s) return '';
+    return `<div class="row" title="${hint}"><span>${label} <b style="color:#e8c165">${s.lvl}</b></span>
+      <span style="flex:1;max-width:110px;height:8px;background:#201a14;border-radius:3px;overflow:hidden;margin:5px 0 0 8px">
+      <span style="display:block;height:100%;width:${s.pct}%;background:linear-gradient(180deg,#d8c26a,#96803a)"></span></span></div>`;
+  };
   let html = `<h3>🎒 ${you.name}</h3>
     <div class="row"><span>Level</span><b>${you.level} (${defs.VOCATIONS[you.vocation].name})</b></div>
     <div class="row"><span>Gold</span><b>💰 ${you.gold}</b></div>
-    <div class="row"><span>Angriff</span><b>⚔ ${you.atk}</b></div>
+    <div class="row"><span>Angriffskraft</span><b>⚔ ${you.atk}</b></div>
     <div class="row"><span>Verteidigung</span><b>🛡 ${you.def}</b></div>
+    <h3 style="margin-top:10px">Fertigkeiten <small style="color:#a89878;font-weight:normal">(steigen durch Benutzen!)</small></h3>
+    ${skillBar('⚔ Angriff', you.skills && you.skills.atk, 'Steigt durch Angriffe – macht deine Schläge stärker')}
+    ${skillBar('🛡 Schildkunst', you.skills && you.skills.shield, 'Steigt, wenn du Treffer einsteckst (mit Schild schneller) – du nimmst weniger Schaden')}
+    ${skillBar('✨ Magie-Level', you.skills && you.skills.magic, 'Steigt durch verbrauchtes Mana – stärkere Zauber & Heilung' + (you.vocation === 'tamer' ? ', stärkere Zähmungen!' : ''))}
     <h3 style="margin-top:10px">Ausrüstung</h3>`;
   b.innerHTML = html;
 
@@ -405,12 +416,12 @@ function renderInventory() {
     const mDiv = document.createElement('div');
     mDiv.innerHTML = `<h3 style="margin-top:10px">🐎 Reittiere (Taste R)</h3>`;
     b.appendChild(mDiv);
-    const MOUNT_NAMES = { horse: 'Pferd', wolf: 'Wolf', bear: 'Bär', giant_spider: 'Riesenspinne', minotaur: 'Minotaurus', golem: 'Steingolem', wyrm: 'Wyrm', dragon: 'Drache' };
     for (const mt of you.mounts) {
       const div = document.createElement('div');
       div.className = 'invItem';
       const riding = you.mounted === mt;
-      div.innerHTML = `<span>${riding ? '▶ ' : ''}${MOUNT_NAMES[mt] || mt}</span>`;
+      const mName = (defs.MONSTER_NAMES && defs.MONSTER_NAMES[mt]) || (mt === 'horse' ? 'Pferd' : mt);
+      div.innerHTML = `<span>${riding ? '▶ ' : ''}${mName}</span>`;
       const btn = document.createElement('button');
       btn.textContent = riding ? 'Absteigen' : 'Reiten';
       btn.onclick = () => handlers.mount(riding ? null : mt);
@@ -449,8 +460,8 @@ function renderInventory() {
     (you.petStable || []).forEach((entry, i) => {
       const div = document.createElement('div');
       div.className = 'invItem';
-      const MOUNT_NAMES2 = { rat: 'Ratte', snake: 'Schlange', spider: 'Spinne', wolf: 'Wolf', bear: 'Bär', giant_spider: 'Riesenspinne' };
-      div.innerHTML = `<span>${MOUNT_NAMES2[entry.type] || entry.type} <small style="color:#a89878">Stufe ${entry.level}</small></span>`;
+      const petName = (defs.MONSTER_NAMES && defs.MONSTER_NAMES[entry.type]) || entry.type;
+      div.innerHTML = `<span>${petName} <small style="color:#a89878">Stufe ${entry.level}</small></span>`;
       const btns = document.createElement('span');
       const dep = document.createElement('button');
       dep.textContent = 'Einsetzen';
@@ -656,14 +667,24 @@ export function showDeath(show) {
   $('deathBox').style.display = show ? 'flex' : 'none';
 }
 
-// ---------------- Minimap + große Karte ----------------
+// ---------------- Minimap + große Karte + Wegpunkt ----------------
 let miniBase = null;
 let miniWorld = null;
 let miniView = { sx: 0, sy: 0, scale: 1 };
 let bigMapScale = 1;
+let waypoint = null;
+
+export function setWaypoint(x, y) { waypoint = { x, y }; }
+export function getWaypoint() { return waypoint; }
+export function clearWaypoint() {
+  waypoint = null;
+  const el = $('wpTxt');
+  if (el) el.style.display = 'none';
+}
 
 // Klick auf die Minimap → dorthin laufen (wie in Tibia)
-export function initMinimapClick(onWalk) {
+// Klick auf die GROSSE Karte → Wegpunkt setzen
+export function initMinimapClick(onWalk, onWaypoint) {
   $('minimap').addEventListener('click', (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
@@ -673,14 +694,16 @@ export function initMinimapClick(onWalk) {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - rect.left) * (e.currentTarget.width / rect.width);
     const py = (e.clientY - rect.top) * (e.currentTarget.height / rect.height);
-    onWalk(Math.round(px / bigMapScale), Math.round(py / bigMapScale));
+    if (onWaypoint) onWaypoint(Math.round(px / bigMapScale), Math.round(py / bigMapScale));
     toggleBigMap(null, true);
   });
   $('bigMapClose').addEventListener('click', () => toggleBigMap(null, true));
+  const wpEl = $('wpTxt');
+  if (wpEl) wpEl.addEventListener('click', () => clearWaypoint());
 }
 
-// Große Weltkarte (Taste M)
-export function toggleBigMap(selfEntity, forceClose = false) {
+// Große Weltkarte (Taste M) – zeigt auch lebende Bosse und den Wegpunkt
+export function toggleBigMap(selfEntity, forceClose = false, entities = null) {
   const box = $('bigMap');
   if (forceClose || box.style.display === 'flex') {
     box.style.display = 'none';
@@ -701,6 +724,26 @@ export function toggleBigMap(selfEntity, forceClose = false) {
     ctx.strokeText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
     ctx.fillStyle = '#e8c165';
     ctx.fillText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
+  }
+  // Lebende Bosse (💀) einzeichnen
+  if (entities) {
+    ctx.font = '18px serif';
+    for (const e of entities.values()) {
+      if (!e.boss || e.dead) continue;
+      ctx.fillText('💀', e.tx * bigMapScale, e.ty * bigMapScale + 6);
+      ctx.font = 'bold 11px Verdana';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.strokeText(e.name, e.tx * bigMapScale, e.ty * bigMapScale + 20);
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(e.name, e.tx * bigMapScale, e.ty * bigMapScale + 20);
+      ctx.font = '18px serif';
+    }
+  }
+  // Wegpunkt (🚩)
+  if (waypoint) {
+    ctx.font = '20px serif';
+    ctx.fillText('🚩', waypoint.x * bigMapScale, waypoint.y * bigMapScale + 4);
   }
   // Eigene Position
   if (selfEntity) {
@@ -752,11 +795,42 @@ export function updateMinimap(entities, selfId) {
     if (e.dead) continue;
     const px = (e.tx - sx) * scale, py = (e.ty - sy) * scale;
     if (px < 0 || py < 0 || px > cv.width || py > cv.height) continue;
+    if (e.boss) {
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(px - 3, py - 3, 7, 7);
+      continue;
+    }
     ctx.fillStyle = e.id === selfId ? '#ffffff'
       : e.kind === 'player' ? '#4caf50'
       : e.kind === 'pet' ? '#4ae8e0'
       : e.kind === 'npc' ? '#e8c165' : '#ff4433';
     ctx.fillRect(px - 1.5, py - 1.5, e.id === selfId ? 4 : 3, e.id === selfId ? 4 : 3);
+  }
+  // Wegpunkt: Fahne im Sichtfeld, sonst goldener Pfeilpunkt am Rand
+  if (waypoint) {
+    let px = (waypoint.x - sx) * scale, py = (waypoint.y - sy) * scale;
+    const inside = px >= 0 && py >= 0 && px <= cv.width && py <= cv.height;
+    if (inside) {
+      ctx.font = '14px serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🚩', px, py + 5);
+    } else {
+      px = Math.max(5, Math.min(cv.width - 5, px));
+      py = Math.max(5, Math.min(cv.height - 5, py));
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    const wpEl = $('wpTxt');
+    if (wpEl) {
+      const dist = Math.max(Math.abs(self.tx - waypoint.x), Math.abs(self.ty - waypoint.y));
+      wpEl.style.display = 'block';
+      wpEl.textContent = `🚩 Wegpunkt: ${dist}m (Klick: löschen)`;
+    }
   }
 }
 

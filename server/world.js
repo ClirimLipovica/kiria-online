@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Welt-Generierung (v8)
-// 1152x1152: offeneres Gelände, 7 schönere Städte (Ringstraßen,
-// mehr Häuser, Brunnen), ~1120 Monster aus 38 Arten – verteilt
-// über die GANZE Karte (feste Zonen + Streu-Spawns).
+// Kiria Online 3D – Welt-Generierung (v9)
+// 1152x1152: offeneres Gelände, 7 Städte, ~1800 Monster aus 68
+// Arten – verteilt über die GANZE Karte (feste Zonen + viele
+// Streu-Spawns) sowie Boss-Plätze und Weltboss-Erscheinungsorte.
 // ---------------------------------------------------------------
 const { TILE, WALKABLE } = require('./constants');
 
@@ -450,12 +450,13 @@ function generateWorld(seed = 20260702) {
     }
   }
 
-  // ---- Monster-Spawngebiete (~1120 Monster, überall auf der Karte) ----
+  // ---- Monster-Spawngebiete (~1800 Monster, überall auf der Karte) ----
   const spawns = [];
   // Anfänger-Ringe um jede Stadt
   for (const t of towns) {
     spawns.push({ type: 'rat', count: 12, cx: t.cx, cy: t.cy, rMin: t.r + 2, rMax: t.r + 12 });
     spawns.push({ type: 'bat', count: 10, cx: t.cx, cy: t.cy, rMin: t.r + 2, rMax: t.r + 14 });
+    spawns.push({ type: 'chicken', count: 6, cx: t.cx, cy: t.cy, rMin: t.r + 2, rMax: t.r + 10 });
   }
   spawns.push(
     { type: 'crab',     count: 12, cx: 240, cy: 900, rMin: 0, rMax: 14 },
@@ -519,23 +520,133 @@ function generateWorld(seed = 20260702) {
     { type: 'dragon',   count: 5,  cx: LAIR.x, cy: LAIR.y, rMin: 0, rMax: 8 },
     { type: 'fire_elemental', count: 8, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 12 },
     { type: 'demon',    count: 6,  cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 10 },
+    // ---- Neue Arten (v9): feste thematische Zonen ----
+    { type: 'chicken',  count: 10, cx: farm.x + 12, cy: farm.y + 8, rMin: 0, rMax: 10 },
+    { type: 'fox',      count: 10, cx: 350, cy: 350, rMin: 0, rMax: 14 },
+    { type: 'fox',      count: 10, cx: 620, cy: 700, rMin: 0, rMax: 14 },
+    { type: 'fox',      count: 8,  cx: 520, cy: 240, rMin: 0, rMax: 12 },
+    { type: 'slime',    count: 12, cx: 250, cy: 760, rMin: 0, rMax: 12 },
+    { type: 'slime',    count: 12, cx: 700, cy: 500, rMin: 0, rMax: 12 },
+    { type: 'kobold',   count: 14, cx: 480, cy: 300, rMin: 0, rMax: 12 },
+    { type: 'kobold',   count: 14, cx: 380, cy: 860, rMin: 0, rMax: 12 },
+    { type: 'giant_wasp', count: 12, cx: 660, cy: 600, rMin: 0, rMax: 12 },
+    { type: 'giant_wasp', count: 12, cx: 330, cy: 450, rMin: 0, rMax: 12 },
+    { type: 'hyena',    count: 12, cx: 760, cy: 700, rMin: 0, rMax: 14 },
+    { type: 'hyena',    count: 12, cx: 400, cy: 780, rMin: 0, rMax: 12 },
+    { type: 'gnoll',    count: 12, cx: 540, cy: 660, rMin: 0, rMax: 12 },
+    { type: 'gnoll',    count: 12, cx: 300, cy: 240, rMin: 0, rMax: 12 },
+    { type: 'crocodile', count: 10, cx: 245, cy: 640, rMin: 0, rMax: 12 },
+    { type: 'crocodile', count: 8,  cx: 330, cy: 930, rMin: 0, rMax: 10 },
+    { type: 'pirate',   count: 12, cx: 240, cy: 940, rMin: 0, rMax: 10 },
+    { type: 'pirate',   count: 10, cx: 940, cy: 900, rMin: 0, rMax: 10 },
+    { type: 'witch',    count: 8,  cx: 160, cy: 420, rMin: 0, rMax: 10 },
+    { type: 'witch',    count: 8,  cx: 240, cy: 260, rMin: 0, rMax: 10 },
+    { type: 'orc_shaman', count: 8, cx: 440, cy: 960, rMin: 0, rMax: 9 },
+    { type: 'orc_shaman', count: 8, cx: 500, cy: 900, rMin: 0, rMax: 10 },
+    { type: 'panther',  count: 10, cx: 700, cy: 340, rMin: 0, rMax: 12 },
+    { type: 'panther',  count: 8,  cx: 250, cy: 530, rMin: 0, rMax: 12 },
+    { type: 'frost_wolf', count: 10, cx: 640, cy: 200, rMin: 0, rMax: 12 },
+    { type: 'frost_wolf', count: 8,  cx: 500, cy: 150, rMin: 0, rMax: 10 },
+    { type: 'gargoyle', count: 8,  cx: 860, cy: 700, rMin: 0, rMax: 12 },
+    { type: 'gargoyle', count: 6,  cx: 980, cy: 560, rMin: 0, rMax: 10 },
+    { type: 'basilisk', count: 8,  cx: 940, cy: 480, rMin: 0, rMax: 12 },
+    { type: 'basilisk', count: 6,  cx: 820, cy: 620, rMin: 0, rMax: 10 },
+    { type: 'treant',   count: 6,  cx: 420, cy: 380, rMin: 0, rMax: 10 },
+    { type: 'treant',   count: 6,  cx: 680, cy: 760, rMin: 0, rMax: 10 },
+    { type: 'sabertooth', count: 8, cx: 860, cy: 180, rMin: 0, rMax: 12 },
+    { type: 'sabertooth', count: 6, cx: 720, cy: 260, rMin: 0, rMax: 10 },
+    { type: 'necromancer', count: 5, cx: GY.x, cy: GY.y, rMin: 0, rMax: 11 },
+    { type: 'necromancer', count: 6, cx: RUIN.x, cy: RUIN.y, rMin: 0, rMax: 14 },
+    { type: 'medusa',   count: 6,  cx: 1000, cy: 660, rMin: 0, rMax: 10 },
+    { type: 'unicorn',  count: 4,  cx: 360, cy: 600, rMin: 0, rMax: 10 },
+    { type: 'unicorn',  count: 3,  cx: 620, cy: 320, rMin: 0, rMax: 10 },
+    { type: 'ice_golem', count: 6, cx: 700, cy: 120, rMin: 0, rMax: 10 },
+    { type: 'ice_golem', count: 5, cx: 840, cy: 100, rMin: 0, rMax: 8 },
+    { type: 'lava_hound', count: 6, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 12 },
+    { type: 'lava_hound', count: 4, cx: LAIR.x, cy: LAIR.y, rMin: 0, rMax: 10 },
+    { type: 'griffin',  count: 5,  cx: 900, cy: 240, rMin: 0, rMax: 10 },
+    { type: 'griffin',  count: 4,  cx: 760, cy: 140, rMin: 0, rMax: 8 },
+    { type: 'shadow_assassin', count: 6, cx: 880, cy: 760, rMin: 0, rMax: 10 },
+    { type: 'frost_giant', count: 5, cx: YETI.x, cy: YETI.y, rMin: 0, rMax: 12 },
+    { type: 'frost_giant', count: 4, cx: 680, cy: 90, rMin: 0, rMax: 10 },
+    { type: 'frost_dragon', count: 4, cx: 600, cy: 110, rMin: 0, rMax: 14 },
+    { type: 'phoenix',  count: 3,  cx: 1000, cy: 1000, rMin: 0, rMax: 10 },
+    { type: 'phoenix',  count: 2,  cx: 1080, cy: 1080, rMin: 0, rMax: 8 },
+    { type: 'shadow_demon', count: 4, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 10 },
+    { type: 'reaper',   count: 3,  cx: RUIN.x, cy: RUIN.y - 12, rMin: 0, rMax: 8 },
+    { type: 'obsidian_golem', count: 4, cx: 1010, cy: 1070, rMin: 0, rMax: 10 },
+    // ---- Neue Arten (v10) ----
+    { type: 'sheep',    count: 10, cx: farm.x + 12, cy: farm.y + 8, rMin: 0, rMax: 12 },
+    { type: 'sheep',    count: 8,  cx: 520, cy: 620, rMin: 0, rMax: 12 },
+    { type: 'giant_beetle', count: 12, cx: 380, cy: 420, rMin: 0, rMax: 12 },
+    { type: 'giant_beetle', count: 12, cx: 640, cy: 520, rMin: 0, rMax: 12 },
+    { type: 'king_cobra', count: 10, cx: 270, cy: 660, rMin: 0, rMax: 12 },
+    { type: 'king_cobra', count: 8,  cx: 360, cy: 950, rMin: 0, rMax: 10 },
+    { type: 'swamp_lurker', count: 10, cx: 240, cy: 620, rMin: 0, rMax: 14 },
+    { type: 'swamp_lurker', count: 8,  cx: 200, cy: 680, rMin: 0, rMax: 10 },
+    { type: 'forest_spirit', count: 8, cx: 400, cy: 360, rMin: 0, rMax: 12 },
+    { type: 'forest_spirit', count: 8, cx: 660, cy: 720, rMin: 0, rMax: 12 },
+    { type: 'cave_bear', count: 8, cx: 800, cy: 480, rMin: 0, rMax: 12 },
+    { type: 'cave_bear', count: 6, cx: 900, cy: 380, rMin: 0, rMax: 10 },
+    { type: 'storm_eagle', count: 6, cx: 880, cy: 200, rMin: 0, rMax: 10 },
+    { type: 'storm_eagle', count: 5, cx: 700, cy: 160, rMin: 0, rMax: 10 },
+    { type: 'mammoth',  count: 6,  cx: 700, cy: 100, rMin: 0, rMax: 12 },
+    { type: 'mammoth',  count: 5,  cx: 820, cy: 80, rMin: 0, rMax: 10 },
+    { type: 'dire_wolf', count: 6, cx: WWALD.x, cy: WWALD.y - 20, rMin: 0, rMax: 10 },
+    { type: 'dire_wolf', count: 5, cx: 540, cy: 100, rMin: 0, rMax: 10 },
+    { type: 'spectral_dragon', count: 3, cx: RUIN.x + 10, cy: RUIN.y + 10, rMin: 0, rMax: 8 },
+    { type: 'spectral_dragon', count: 3, cx: LAIR.x, cy: LAIR.y + 16, rMin: 0, rMax: 8 },
   );
 
-  // Streu-Spawns: 45 zufällige Wildnis-Gruppen auf ERREICHBAREN Kacheln
+  // Streu-Spawns: zufällige Wildnis-Gruppen auf ERREICHBAREN Kacheln.
+  // 85 gemischte Gruppen + 35 Elite-Gruppen fernab der Städte:
+  // die Wildnis lebt ÜBERALL, nicht nur an festen Orten.
   const inAnyTown = (x, y) => towns.some((t) => Math.abs(x - t.cx) <= t.r + 6 && Math.abs(y - t.cy) <= t.r + 6);
-  const scatterPool = ['rat', 'bat', 'boar', 'wolf', 'spider', 'goblin', 'snake', 'bandit', 'scorpion', 'bear', 'troll', 'orc'];
-  let placedScatter = 0;
-  let guard = 0;
-  while (placedScatter < 45 && guard++ < 4000) {
-    const ni = reachList[Math.floor(rand() * reachList.length)];
-    const x = ni % SIZE, y = Math.floor(ni / SIZE);
-    if (inAnyTown(x, y)) continue;
-    const type = scatterPool[Math.floor(rand() * scatterPool.length)];
-    spawns.push({ type, count: 5 + Math.floor(rand() * 4), cx: x, cy: y, rMin: 0, rMax: 10 });
-    placedScatter++;
-  }
+  const distToTown = (x, y) => Math.min(...towns.map((t) => Math.hypot(x - t.cx, y - t.cy)));
+  const scatterPool = [
+    'rat', 'bat', 'boar', 'wolf', 'spider', 'goblin', 'snake', 'bandit', 'scorpion', 'bear', 'troll', 'orc',
+    'chicken', 'fox', 'slime', 'kobold', 'giant_wasp', 'hyena', 'gnoll', 'crocodile', 'pirate',
+    'sheep', 'giant_beetle', 'king_cobra',
+  ];
+  const elitePool = [
+    'witch', 'orc_shaman', 'panther', 'frost_wolf', 'gargoyle', 'basilisk', 'treant',
+    'sabertooth', 'hunter', 'dark_elf', 'werewolf', 'ogre', 'harpy', 'ghoul', 'lizardman',
+    'swamp_lurker', 'forest_spirit', 'cave_bear',
+  ];
+  const placeScatter = (pool, groups, minTownDist) => {
+    let placed = 0;
+    let guard = 0;
+    while (placed < groups && guard++ < 8000) {
+      const ni = reachList[Math.floor(rand() * reachList.length)];
+      const x = ni % SIZE, y = Math.floor(ni / SIZE);
+      if (inAnyTown(x, y)) continue;
+      if (minTownDist && distToTown(x, y) < minTownDist) continue;
+      const type = pool[Math.floor(rand() * pool.length)];
+      spawns.push({ type, count: 5 + Math.floor(rand() * 4), cx: x, cy: y, rMin: 0, rMax: 10 });
+      placed++;
+    }
+  };
+  placeScatter(scatterPool, 85, 0);
+  placeScatter(elitePool, 35, 90);
 
-  return { size: SIZE, tiles, heights, buildings, spawns, npcs, templeSpawn, towns, fountains, farm, reachable };
+  // ---- Boss-Plätze (Spawnsystem in game.js) ----
+  const bossLairs = [
+    { type: 'boss_spider_queen', x: 250, y: 450, r: 5, zone: 'im Spinnenwald westlich von Eichwald' },
+    { type: 'boss_orc_warlord',  x: FORT.x, y: FORT.y, r: 5, zone: 'in der Ork-Festung im Süden' },
+    { type: 'boss_yeti_king',    x: YETI.x, y: YETI.y, r: 5, zone: 'in den Yeti-Bergen im hohen Norden' },
+    { type: 'boss_lich_king',    x: RUIN.x, y: RUIN.y - 12, r: 5, zone: 'in den verfluchten Ruinen im Osten' },
+    { type: 'boss_dragon_lord',  x: LAIR.x, y: LAIR.y, r: 5, zone: 'in der Drachenhöhle im Nordosten' },
+  ];
+  // Mögliche Erscheinungsorte des täglichen Weltbosses
+  const worldBossSpots = [
+    { x: 576, y: 760, name: 'südlich von Kiria' },
+    { x: 400, y: 576, name: 'westlich von Kiria' },
+    { x: 760, y: 430, name: 'nordöstlich von Kiria' },
+    { x: 300, y: 800, name: 'nördlich von Porta' },
+    { x: 860, y: 560, name: 'westlich der Ruinen' },
+  ];
+
+  return { size: SIZE, tiles, heights, buildings, spawns, npcs, templeSpawn, towns, fountains, farm, reachable, bossLairs, worldBossSpots };
 }
 
 function isWalkable(world, x, y) {

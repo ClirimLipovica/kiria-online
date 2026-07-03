@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – Welt-Rendering (v6)
+// Kiria Online 3D – Welt-Rendering (v9)
 // Chunk-System (32x32-Kacheln, lädt nur die Umgebung des Spielers),
-// Wasser, Himmel mit Sonne/Mond/Sternen, Tag/Nacht, Städte-Deko
-// (Fackeln, Springbrunnen) und lebendige Natur: Schmetterlinge,
-// Vögel, Wolken, Kaninchen, Rehe, fallende Blätter, Glühwürmchen.
+// Wasser, Himmel mit Sonne/Mond/Sternen, Tag/Nacht, schönere Städte
+// (getönte Hauswände, Fenster, Türen, Schornsteine, Marktstände,
+// Blumenbeete, Fackeln, Springbrunnen) und lebendige Natur.
 // ---------------------------------------------------------------
 import * as THREE from 'three';
 import { makeAnimal } from './entities.js';
@@ -47,7 +47,21 @@ export class World3D {
     this.chunks = new Map();
     this._lastChunkAt = 0;
     this.wallGeo = new THREE.BoxGeometry(1, 1.9, 1);
-    this.wallMat = new THREE.MeshLambertMaterial({ color: 0xb8a890 });
+    this.wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+    // Wandfarbe je Gebäudeart: Tempel = heller Stein, Laden = warmes
+    // Holz, Wohnhaus = Fachwerk-Creme, Rest (Festung/Ruine) = Fels
+    this.wallKindColor = { temple: 0xd8d8e2, shop: 0xc09468, house: 0xd8ccb0 };
+    this.wallKind = new Map();
+    for (const b of this.buildings) {
+      for (let yy = b.y; yy < b.y + b.h; yy++) {
+        for (let xx = b.x; xx < b.x + b.w; xx++) {
+          if (xx === b.x || xx === b.x + b.w - 1 || yy === b.y || yy === b.y + b.h - 1) {
+            this.wallKind.set(xx + ',' + yy, b.kind);
+          }
+        }
+      }
+    }
 
     // geteilte Materialien/Geometrien für Chunks
     this.groundMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -201,13 +215,14 @@ export class World3D {
     const up = new THREE.Vector3(0, 1, 0);
     const cc = new THREE.Color();
 
-    // 3D-Mauern (Häuser, Festungen, Ruinen)
+    // 3D-Mauern (Häuser, Festungen, Ruinen) – getönt je Gebäudeart
     if (walls.length) {
       const mesh = new THREE.InstancedMesh(this.wallGeo, this.wallMat, walls.length);
       walls.forEach(([x, y], i) => {
         m4.compose(new THREE.Vector3(x, this.groundY(x, y) + 0.95, y), q.identity(), new THREE.Vector3(1, 1, 1));
         mesh.setMatrixAt(i, m4);
-        cc.setHex(0xffffff).multiplyScalar(0.9 + rand() * 0.18);
+        const kind = this.wallKind.get(x + ',' + y);
+        cc.setHex(this.wallKindColor[kind] || 0x9a8a76).multiplyScalar(0.9 + rand() * 0.18);
         mesh.setColorAt(i, cc);
       });
       mesh.castShadow = mesh.receiveShadow = true;
@@ -292,23 +307,31 @@ export class World3D {
     this.waterGeo = geo;
     this.waterBase = Float32Array.from(geo.attributes.position.array);
     const mat = new THREE.MeshPhongMaterial({
-      color: 0x2b6b9e, transparent: true, opacity: 0.8, shininess: 90, specular: 0x88bbdd,
+      color: 0x2e78ac, transparent: true, opacity: 0.78, shininess: 140, specular: 0xaad4ee,
     });
     this.water = new THREE.Mesh(geo, mat);
     this.water.position.set(0, 0.3, 0);
     this.scene.add(this.water);
   }
 
-  // ================= GEBÄUDE-DÄCHER =================
-  // Wände kommen aus den Kacheln (begehbar!), hier nur die Dächer.
-  // Steht der eigene Held im Haus, wird das Dach ausgeblendet.
+  // ================= GEBÄUDE-DÄCHER + DETAILS =================
+  // Wände kommen aus den Kacheln (begehbar!), hier Dächer, Fenster,
+  // Türen und Schornsteine. Steht der eigene Held im Haus, wird das
+  // Dach ausgeblendet.
   _buildBuildings() {
     const roofMats = {
       temple: new THREE.MeshLambertMaterial({ color: 0x3a6ea8 }),
       shop: new THREE.MeshLambertMaterial({ color: 0x8a4a2a }),
-      house: new THREE.MeshLambertMaterial({ color: 0x9a3f2f }),
     };
+    // Wohnhäuser bekommen abwechslungsreiche Dachfarben
+    const housePalette = [0x9a3f2f, 0x7a5a2f, 0x4a6a8a, 0x8a4a6a].map(
+      (c) => new THREE.MeshLambertMaterial({ color: c }),
+    );
     this.roofs = [];
+    const windowT = []; // Transformationen für Instanzen sammeln
+    const doorT = [];
+    const chimneyT = [];
+    let houseIdx = 0;
     for (const b of this.buildings) {
       const cx = b.x + b.w / 2 - 0.5;
       const cz = b.y + b.h / 2 - 0.5;
@@ -316,13 +339,32 @@ export class World3D {
       const wallH = 1.9;
       const roofH = b.kind === 'temple' ? 1.6 : 1.1;
       const roofR = Math.sqrt(b.w * b.w + b.h * b.h) / 2;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(roofR, roofH, 4), roofMats[b.kind] || roofMats.house);
+      const roofMat = roofMats[b.kind] || housePalette[houseIdx++ % housePalette.length];
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(roofR, roofH, 4), roofMat);
       roof.rotation.y = Math.PI / 4;
       roof.scale.set((b.w + 0.7) / (roofR * Math.SQRT2), 1, (b.h + 0.7) / (roofR * Math.SQRT2));
       roof.position.set(cx, gy + wallH + roofH / 2, cz);
       roof.castShadow = true;
       this.scene.add(roof);
       this.roofs.push({ roof, b });
+
+      // Fenster an Süd- und Nordwand (jede zweite Kachel, Tür ausgespart)
+      const wy = gy + 1.15;
+      for (let x = b.x + 1; x < b.x + b.w - 1; x += 2) {
+        if (x !== b.doorX) windowT.push([x, wy, b.y + b.h - 1 + 0.52, 0]);
+        windowT.push([x, wy, b.y - 0.52, Math.PI]);
+      }
+      // Fenster an Ost/West bei größeren Gebäuden
+      if (b.h > 4) {
+        for (let y = b.y + 1; y < b.y + b.h - 1; y += 2) {
+          windowT.push([b.x - 0.52, wy, y, -Math.PI / 2]);
+          windowT.push([b.x + b.w - 1 + 0.52, wy, y, Math.PI / 2]);
+        }
+      }
+      // Holztür am Eingang
+      if (b.doorX !== undefined) doorT.push([b.doorX, gy + 0.8, b.y + b.h - 1 + 0.53, 0]);
+      // Schornstein auf Häusern und Läden
+      if (b.kind !== 'temple') chimneyT.push([b.x + 1, gy + wallH + roofH * 0.55, b.y + 1]);
 
       // Wehende Fahne auf jedem Tempel
       if (b.kind === 'temple') {
@@ -338,6 +380,50 @@ export class World3D {
         if (!this.flagsList) this.flagsList = [];
         this.flagsList.push({ flag, base: Float32Array.from(flagGeo.attributes.position.array) });
       }
+    }
+
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    // Warm leuchtende Fenster (wirken abends bewohnt)
+    if (windowT.length) {
+      const winMesh = new THREE.InstancedMesh(
+        new THREE.PlaneGeometry(0.42, 0.52),
+        new THREE.MeshBasicMaterial({ color: 0xffd98a, side: THREE.DoubleSide }),
+        windowT.length,
+      );
+      windowT.forEach(([x, y, z, rot], i) => {
+        q.setFromAxisAngle(up, rot);
+        m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1));
+        winMesh.setMatrixAt(i, m4);
+      });
+      this.scene.add(winMesh);
+    }
+    if (doorT.length) {
+      const doorMesh = new THREE.InstancedMesh(
+        new THREE.PlaneGeometry(0.75, 1.5),
+        new THREE.MeshLambertMaterial({ color: 0x5a3a1c, side: THREE.DoubleSide }),
+        doorT.length,
+      );
+      doorT.forEach(([x, y, z, rot], i) => {
+        q.setFromAxisAngle(up, rot);
+        m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1));
+        doorMesh.setMatrixAt(i, m4);
+      });
+      this.scene.add(doorMesh);
+    }
+    if (chimneyT.length) {
+      const chimMesh = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(0.36, 1.0, 0.36),
+        new THREE.MeshLambertMaterial({ color: 0x8a7264 }),
+        chimneyT.length,
+      );
+      chimneyT.forEach(([x, y, z], i) => {
+        m4.compose(new THREE.Vector3(x, y, z), q.identity(), new THREE.Vector3(1, 1, 1));
+        chimMesh.setMatrixAt(i, m4);
+      });
+      chimMesh.castShadow = true;
+      this.scene.add(chimMesh);
     }
   }
 
@@ -416,6 +502,66 @@ export class World3D {
       this.scene.add(pts);
       this.fountainJets.push({ pts, x: f.x, y: f.y, gy: gy - H_STEP, phases: Array.from({ length: N }, () => Math.random()) });
     }
+
+    // Marktstände: bunte Dächer, Theke und Fässer auf jeder Plaza
+    const stallColors = [0xc23b3b, 0x3b6cc2, 0x2fae4e, 0xd8a93a];
+    const postGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.3, 5);
+    const postMat = new THREE.MeshLambertMaterial({ color: 0x6a4a26 });
+    const barrelGeo = new THREE.CylinderGeometry(0.22, 0.26, 0.55, 8);
+    const barrelMat = new THREE.MeshLambertMaterial({ color: 0x7a5230 });
+    const crateGeo = new THREE.BoxGeometry(0.45, 0.45, 0.45);
+    const crateMat = new THREE.MeshLambertMaterial({ color: 0xa8814e });
+    this.towns.forEach((t, ti) => {
+      const sx = t.cx + 6, sy = t.cy - 1; // östlich der Plaza
+      const gy = this.groundY(sx, sy);
+      for (const [ox, oz] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) {
+        const post = new THREE.Mesh(postGeo, postMat);
+        post.position.set(sx + ox, gy + 0.65, sy + oz);
+        post.castShadow = true;
+        this.scene.add(post);
+      }
+      const canopy = new THREE.Mesh(
+        new THREE.ConeGeometry(1.5, 0.55, 4),
+        new THREE.MeshLambertMaterial({ color: stallColors[ti % stallColors.length] }),
+      );
+      canopy.rotation.y = Math.PI / 4;
+      canopy.position.set(sx, gy + 1.55, sy);
+      canopy.castShadow = true;
+      const counter = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 0.5), crateMat);
+      counter.position.set(sx, gy + 0.25, sy + 0.7);
+      counter.castShadow = true;
+      const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+      barrel.position.set(sx - 1.4, gy + 0.28, sy + 0.9);
+      barrel.castShadow = true;
+      const crate = new THREE.Mesh(crateGeo, crateMat);
+      crate.position.set(sx + 1.4, gy + 0.23, sy + 0.9);
+      crate.castShadow = true;
+      this.scene.add(canopy, counter, barrel, crate);
+    });
+
+    // Blumenbeete rund um jeden Brunnen
+    const bedFlowerGeo = new THREE.SphereGeometry(0.07, 5, 4);
+    const palette = [0xe84a5a, 0xe8d24a, 0xa85ae8, 0xffffff, 0xff9a3a];
+    const total = this.fountainList.length * 10;
+    if (total) {
+      const beds = new THREE.InstancedMesh(bedFlowerGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), total);
+      const m4 = new THREE.Matrix4();
+      const cc = new THREE.Color();
+      let i = 0;
+      for (const f of this.fountainList) {
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2;
+          const x = f.x + Math.cos(a) * 1.6;
+          const z = f.y + Math.sin(a) * 1.6;
+          m4.makeTranslation(x, this.groundY(Math.round(x), Math.round(z)) + 0.1, z);
+          beds.setMatrixAt(i, m4);
+          cc.setHex(palette[k % palette.length]);
+          beds.setColorAt(i, cc);
+          i++;
+        }
+      }
+      this.scene.add(beds);
+    }
   }
 
   _buildTownLabels() {
@@ -440,8 +586,30 @@ export class World3D {
     }
   }
 
-  // ================= HIMMEL: Sonne, Mond, Sterne =================
+  // ================= HIMMEL: Kuppel, Sonne, Mond, Sterne =================
   _buildSky() {
+    // Himmels-Kuppel mit weichem Farbverlauf (statt flacher Hintergrundfarbe)
+    this.skyUniforms = {
+      topColor: { value: new THREE.Color(0x6aa8e8) },
+      horizonColor: { value: new THREE.Color(0xd8e8f4) },
+    };
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: this.skyUniforms,
+      vertexShader: `varying vec3 vPos;
+        void main() { vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform vec3 topColor; uniform vec3 horizonColor; varying vec3 vPos;
+        void main() {
+          float h = clamp(normalize(vPos).y * 1.8 + 0.18, 0.0, 1.0);
+          gl_FragColor = vec4(mix(horizonColor, topColor, pow(h, 0.8)), 1.0);
+        }`,
+    });
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(200, 24, 14), skyMat);
+    this.skyDome.frustumCulled = false;
+    this.skyDome.renderOrder = -100;
+    this.scene.add(this.skyDome);
+
     const disc = (color, glow) => {
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 64;
@@ -629,9 +797,9 @@ export class World3D {
   }
 
   _buildLights() {
-    this.hemi = new THREE.HemisphereLight(0xd4e8ff, 0x5f4f38, 0.95);
+    this.hemi = new THREE.HemisphereLight(0xd8e8ff, 0x6a5840, 1.0);
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight(0xfff0d0, 1.7);
+    this.sun = new THREE.DirectionalLight(0xffedc8, 1.9);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.near = 5;
@@ -642,11 +810,14 @@ export class World3D {
     this.sun.shadow.bias = -0.0008;
     this.scene.add(this.sun, this.sun.target);
 
-    this.scene.fog = new THREE.FogExp2(0xbfd8e8, 0.015);
+    this.scene.fog = new THREE.FogExp2(0xbfd8e8, 0.013);
     this.scene.background = new THREE.Color(0x9ec8e8);
-    this._skyDay = new THREE.Color(0x9ecff0);
-    this._skyNight = new THREE.Color(0x090e20);
-    this._skyDawn = new THREE.Color(0xd8996a);
+    this._skyDay = new THREE.Color(0x5a9ae0);      // sattes Himmelblau (Zenit)
+    this._skyNight = new THREE.Color(0x070b1c);
+    this._skyDawn = new THREE.Color(0xd8895a);
+    this._horDay = new THREE.Color(0xcfe6f4);      // heller Horizont
+    this._horNight = new THREE.Color(0x141a30);
+    this._horDawn = new THREE.Color(0xf0b070);
   }
 
   // ================= UPDATE =================
@@ -681,12 +852,17 @@ export class World3D {
     const dawn = Math.max(0, 1 - Math.abs(dayness - 0.15) * 6) * (dayness > 0.01 ? 1 : 0);
     const night = Math.max(0, 1 - dayness * 2.5);
 
-    this.sun.intensity = 0.15 + dayness * 1.6;
-    this.hemi.intensity = 0.3 + dayness * 0.75;
+    this.sun.intensity = 0.15 + dayness * 1.75;
+    this.hemi.intensity = 0.32 + dayness * 0.8;
     const sky = this._skyNight.clone().lerp(this._skyDay, dayness);
-    if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.5);
+    if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.45);
+    const horizon = this._horNight.clone().lerp(this._horDay, dayness);
+    if (dawn > 0) horizon.lerp(this._horDawn, dawn * 0.7);
     this.scene.background.copy(sky);
-    this.scene.fog.color.copy(sky);
+    this.scene.fog.color.copy(horizon);
+    this.skyUniforms.topColor.value.copy(sky);
+    this.skyUniforms.horizonColor.value.copy(horizon);
+    this.skyDome.position.set(center.x, 0, center.z);
     this.starMat.opacity = night * 0.9;
 
     const sunX = Math.cos(sunAngle), sunY = Math.sin(sunAngle);

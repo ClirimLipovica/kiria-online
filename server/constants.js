@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------
-// Kiria Online 3D – gemeinsame Spielkonstanten (v8)
-// 38 Monster (stark!), 10 Zauber pro Beruf, XP-Rebalance,
-// Mounts, Essen, Berufs-Ausrüstung, 25 Quests
+// Kiria Online 3D – gemeinsame Spielkonstanten (v9)
+// 68 Monster + 6 Bosse (inkl. täglicher Weltboss), viel mehr
+// Ausrüstung, Sammel-Loot (Trophäen & Schätze), neue Mounts,
+// 10 Zauber pro Beruf, 25 Quests
 // ---------------------------------------------------------------
 
 const TILE = {
@@ -12,49 +13,103 @@ const TILE = {
 const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR]);
 
 // tame: zähmbar • flee: flieht bei wenig Leben • kite: hält Abstand (Fernkampf)
-// pack: alarmiert Artgenossen in der Nähe
+// pack: alarmiert Artgenossen in der Nähe • boss: Boss (Spezial-Spawnsystem)
 const MONSTERS = {
   // ---- Anfänger (rund um alle Städte) ----
-  bat:       { name: 'Fledermaus',    hp: 20,   dmg: 5,   atkMs: 1800, moveMs: 420, xp: 3,   gold: [0, 3],     aggro: 5, flee: true, drops: [] },
-  rat:       { name: 'Ratte',         hp: 30,   dmg: 7,   atkMs: 1900, moveMs: 600, xp: 4,   gold: [1, 5],     aggro: 5, tame: true, flee: true, drops: [{ item: 'cheese', p: 0.35 }] },
-  crab:      { name: 'Krabbe',        hp: 50,   dmg: 11,  atkMs: 2100, moveMs: 700, xp: 6,   gold: [1, 7],     aggro: 5, drops: [{ item: 'meat', p: 0.3 }] },
-  snake:     { name: 'Schlange',      hp: 45,   dmg: 12,  atkMs: 1900, moveMs: 650, xp: 7,   gold: [0, 5],     aggro: 6, tame: true, drops: [{ item: 'mp_potion', p: 0.05 }] },
-  boar:      { name: 'Wildschwein',   hp: 65,   dmg: 15,  atkMs: 2000, moveMs: 520, xp: 9,   gold: [0, 4],     aggro: 6, tame: true, drops: [{ item: 'meat', p: 0.5 }, { item: 'ham', p: 0.1 }] },
-  spider:    { name: 'Spinne',        hp: 60,   dmg: 15,  atkMs: 1700, moveMs: 460, xp: 10,  gold: [1, 8],     aggro: 7, tame: true, pack: true, drops: [{ item: 'mp_potion', p: 0.07 }] },
-  wolf:      { name: 'Wolf',          hp: 85,   dmg: 19,  atkMs: 1700, moveMs: 430, xp: 13,  gold: [2, 9],     aggro: 8, tame: true, pack: true, drops: [{ item: 'meat', p: 0.4 }, { item: 'saddle_wolf', p: 0.008 }] },
-  goblin:    { name: 'Goblin',        hp: 105,  dmg: 20,  atkMs: 1800, moveMs: 480, xp: 14,  gold: [4, 16],    aggro: 7, flee: true, pack: true, drops: [{ item: 'dagger', p: 0.07 }, { item: 'cheese', p: 0.2 }, { item: 'cloth_legs', p: 0.05 }] },
+  chicken:   { name: 'Huhn',          hp: 14,   dmg: 3,   atkMs: 2200, moveMs: 550, xp: 2,   gold: [0, 2],     aggro: 3, tame: true, flee: true, drops: [{ item: 'feather', p: 0.5 }, { item: 'meat', p: 0.15 }] },
+  sheep:     { name: 'Schaf',         hp: 25,   dmg: 4,   atkMs: 2400, moveMs: 600, xp: 3,   gold: [0, 3],     aggro: 2, tame: true, flee: true, drops: [{ item: 'wool', p: 0.6 }, { item: 'meat', p: 0.2 }] },
+  bat:       { name: 'Fledermaus',    hp: 20,   dmg: 5,   atkMs: 1800, moveMs: 420, xp: 3,   gold: [0, 3],     aggro: 5, flee: true, drops: [{ item: 'rag', p: 0.25 }] },
+  rat:       { name: 'Ratte',         hp: 30,   dmg: 7,   atkMs: 1900, moveMs: 600, xp: 4,   gold: [1, 5],     aggro: 5, tame: true, flee: true, drops: [{ item: 'cheese', p: 0.35 }, { item: 'rat_tail', p: 0.4 }] },
+  fox:       { name: 'Fuchs',         hp: 40,   dmg: 10,  atkMs: 1900, moveMs: 420, xp: 6,   gold: [0, 4],     aggro: 5, tame: true, flee: true, drops: [{ item: 'fox_fur', p: 0.45 }] },
+  crab:      { name: 'Krabbe',        hp: 50,   dmg: 11,  atkMs: 2100, moveMs: 700, xp: 6,   gold: [1, 7],     aggro: 5, drops: [{ item: 'meat', p: 0.3 }, { item: 'pearl', p: 0.03 }] },
+  snake:     { name: 'Schlange',      hp: 45,   dmg: 12,  atkMs: 1900, moveMs: 650, xp: 7,   gold: [0, 5],     aggro: 6, tame: true, drops: [{ item: 'mp_potion', p: 0.05 }, { item: 'snake_skin', p: 0.35 }] },
+  slime:     { name: 'Schleim',       hp: 60,   dmg: 13,  atkMs: 2000, moveMs: 750, xp: 8,   gold: [1, 6],     aggro: 6, drops: [{ item: 'mp_potion', p: 0.07 }, { item: 'amber', p: 0.03 }] },
+  boar:      { name: 'Wildschwein',   hp: 65,   dmg: 15,  atkMs: 2000, moveMs: 520, xp: 9,   gold: [0, 4],     aggro: 6, tame: true, drops: [{ item: 'meat', p: 0.5 }, { item: 'ham', p: 0.1 }, { item: 'tusk', p: 0.25 }] },
+  giant_wasp:{ name: 'Riesenwespe',   hp: 75,   dmg: 16,  atkMs: 1500, moveMs: 400, xp: 11,  gold: [0, 5],     aggro: 7, drops: [{ item: 'amber', p: 0.08 }] },
+  spider:    { name: 'Spinne',        hp: 60,   dmg: 15,  atkMs: 1700, moveMs: 460, xp: 10,  gold: [1, 8],     aggro: 7, tame: true, pack: true, drops: [{ item: 'mp_potion', p: 0.07 }, { item: 'spider_silk', p: 0.3 }] },
+  wolf:      { name: 'Wolf',          hp: 85,   dmg: 19,  atkMs: 1700, moveMs: 430, xp: 13,  gold: [2, 9],     aggro: 8, tame: true, pack: true, drops: [{ item: 'meat', p: 0.4 }, { item: 'wolf_pelt', p: 0.35 }, { item: 'saddle_wolf', p: 0.008 }] },
+  kobold:    { name: 'Kobold',        hp: 95,   dmg: 19,  atkMs: 1800, moveMs: 500, xp: 13,  gold: [3, 14],    aggro: 7, pack: true, flee: true, drops: [{ item: 'dagger', p: 0.06 }, { item: 'bone', p: 0.3 }, { item: 'club', p: 0.04 }] },
+  goblin:    { name: 'Goblin',        hp: 105,  dmg: 20,  atkMs: 1800, moveMs: 480, xp: 14,  gold: [4, 16],    aggro: 7, flee: true, pack: true, drops: [{ item: 'dagger', p: 0.07 }, { item: 'cheese', p: 0.2 }, { item: 'cloth_legs', p: 0.05 }, { item: 'rag', p: 0.3 }, { item: 'bone', p: 0.15 }] },
+  hyena:     { name: 'Hyäne',         hp: 140,  dmg: 25,  atkMs: 1700, moveMs: 450, xp: 19,  gold: [2, 10],    aggro: 8, tame: true, pack: true, drops: [{ item: 'meat', p: 0.4 }, { item: 'tusk', p: 0.08 }] },
+  giant_beetle: { name: 'Riesenkäfer', hp: 130, dmg: 24,  atkMs: 1900, moveMs: 560, xp: 18,  gold: [2, 10],    aggro: 7, drops: [{ item: 'amber', p: 0.1 }, { item: 'mp_potion', p: 0.06 }] },
   // ---- Mittelstufe ----
-  bandit:    { name: 'Bandit',        hp: 190,  dmg: 30,  atkMs: 1900, moveMs: 480, xp: 25,  gold: [10, 40],   aggro: 8, pack: true, drops: [{ item: 'dagger', p: 0.08 }, { item: 'leather', p: 0.06 }, { item: 'leather_legs', p: 0.05 }, { item: 'bread', p: 0.2 }] },
-  scorpion:  { name: 'Skorpion',      hp: 200,  dmg: 36,  atkMs: 1500, moveMs: 500, xp: 28,  gold: [8, 30],    aggro: 8, drops: [{ item: 'mp_potion', p: 0.12 }, { item: 'leather_legs', p: 0.05 }] },
-  orc:       { name: 'Ork',           hp: 220,  dmg: 34,  atkMs: 1900, moveMs: 520, xp: 30,  gold: [8, 32],    aggro: 7, pack: true, drops: [{ item: 'sword', p: 0.05 }, { item: 'bow', p: 0.04 }, { item: 'leather', p: 0.05 }, { item: 'leather_helm', p: 0.05 }, { item: 'meat', p: 0.25 }, { item: 'hp_potion', p: 0.1 }] },
-  troll:     { name: 'Troll',         hp: 280,  dmg: 42,  atkMs: 2100, moveMs: 580, xp: 40,  gold: [12, 42],   aggro: 7, drops: [{ item: 'boots', p: 0.06 }, { item: 'wood_shield', p: 0.06 }, { item: 'meat', p: 0.3 }, { item: 'hp_potion', p: 0.12 }] },
-  ghost:     { name: 'Geist',         hp: 250,  dmg: 42,  atkMs: 1700, moveMs: 450, xp: 45,  gold: [10, 45],   aggro: 8, drops: [{ item: 'mp_potion', p: 0.16 }, { item: 'magic_hat', p: 0.02 }] },
-  skeleton:  { name: 'Skelett',       hp: 320,  dmg: 46,  atkMs: 1900, moveMs: 560, xp: 48,  gold: [14, 48],   aggro: 8, drops: [{ item: 'axe', p: 0.04 }, { item: 'wand', p: 0.04 }, { item: 'chain', p: 0.04 }, { item: 'iron_helm', p: 0.03 }, { item: 'mp_potion', p: 0.1 }] },
-  zombie:    { name: 'Zombie',        hp: 400,  dmg: 48,  atkMs: 2100, moveMs: 720, xp: 55,  gold: [18, 55],   aggro: 8, drops: [{ item: 'leather', p: 0.06 }, { item: 'leather_legs', p: 0.05 }, { item: 'hp_potion', p: 0.12 }] },
-  hunter:    { name: 'Wilderer',      hp: 400,  dmg: 38,  atkMs: 1900, moveMs: 480, xp: 60,  gold: [25, 80],   aggro: 9, kite: true, ranged: { dmg: 48, range: 6, ms: 2300 }, drops: [{ item: 'crossbow', p: 0.05 }, { item: 'ranger_legs', p: 0.04 }, { item: 'meat', p: 0.25 }, { item: 'hp_potion', p: 0.12 }] },
-  bear:      { name: 'Bär',           hp: 450,  dmg: 55,  atkMs: 2100, moveMs: 540, xp: 65,  gold: [5, 25],    aggro: 6, tame: true, drops: [{ item: 'meat', p: 0.5 }, { item: 'ham', p: 0.25 }, { item: 'saddle_bear', p: 0.008 }, { item: 'hp_potion', p: 0.15 }] },
-  lizardman: { name: 'Echsenkrieger', hp: 500,  dmg: 58,  atkMs: 1900, moveMs: 500, xp: 75,  gold: [25, 75],   aggro: 8, pack: true, drops: [{ item: 'chain', p: 0.06 }, { item: 'iron_shield', p: 0.04 }, { item: 'hp_potion', p: 0.15 }] },
-  dark_elf:  { name: 'Dunkelelf',     hp: 480,  dmg: 42,  atkMs: 1800, moveMs: 460, xp: 85,  gold: [30, 90],   aggro: 9, kite: true, ranged: { dmg: 62, range: 6, ms: 2200 }, drops: [{ item: 'elven_bow', p: 0.02 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.2 }] },
-  ghoul:     { name: 'Ghul',          hp: 520,  dmg: 62,  atkMs: 1800, moveMs: 500, xp: 80,  gold: [28, 80],   aggro: 8, pack: true, drops: [{ item: 'chain', p: 0.05 }, { item: 'wild_claws', p: 0.04 }, { item: 'mp_potion', p: 0.14 }] },
-  harpy:     { name: 'Harpyie',       hp: 500,  dmg: 52,  atkMs: 1700, moveMs: 400, xp: 90,  gold: [30, 85],   aggro: 9, kite: true, ranged: { dmg: 58, range: 5, ms: 2400 }, drops: [{ item: 'swift_boots', p: 0.015 }, { item: 'mp_potion', p: 0.2 }] },
-  orc_berserker: { name: 'Ork-Berserker', hp: 560, dmg: 66, atkMs: 1700, moveMs: 460, xp: 85, gold: [30, 90], aggro: 8, pack: true, drops: [{ item: 'axe', p: 0.05 }, { item: 'chain', p: 0.05 }, { item: 'iron_helm', p: 0.04 }, { item: 'ham', p: 0.15 }, { item: 'hp_potion', p: 0.15 }] },
-  banshee:   { name: 'Todesfee',      hp: 580,  dmg: 58,  atkMs: 1900, moveMs: 460, xp: 100, gold: [35, 110],  aggro: 8, kite: true, ranged: { dmg: 70, range: 5, ms: 2400 }, drops: [{ item: 'magic_hat', p: 0.04 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.18 }] },
-  werewolf:  { name: 'Werwolf',       hp: 650,  dmg: 70,  atkMs: 1600, moveMs: 380, xp: 110, gold: [20, 70],   aggro: 9, pack: true, drops: [{ item: 'swift_boots', p: 0.02 }, { item: 'hide_legs', p: 0.04 }, { item: 'meat', p: 0.3 }, { item: 'hp_potion', p: 0.18 }] },
-  mummy:     { name: 'Mumie',         hp: 750,  dmg: 72,  atkMs: 2000, moveMs: 620, xp: 120, gold: [45, 120],  aggro: 8, drops: [{ item: 'silk_legs', p: 0.05 }, { item: 'fire_wand', p: 0.03 }, { item: 'mp_potion', p: 0.2 }] },
+  bandit:    { name: 'Bandit',        hp: 190,  dmg: 30,  atkMs: 1900, moveMs: 480, xp: 25,  gold: [10, 40],   aggro: 8, pack: true, drops: [{ item: 'dagger', p: 0.08 }, { item: 'leather', p: 0.06 }, { item: 'leather_legs', p: 0.05 }, { item: 'bread', p: 0.2 }, { item: 'silver_ring', p: 0.04 }, { item: 'rag', p: 0.3 }] },
+  scorpion:  { name: 'Skorpion',      hp: 200,  dmg: 36,  atkMs: 1500, moveMs: 500, xp: 28,  gold: [8, 30],    aggro: 8, drops: [{ item: 'mp_potion', p: 0.12 }, { item: 'leather_legs', p: 0.05 }, { item: 'bone', p: 0.25 }, { item: 'amber', p: 0.04 }] },
+  orc:       { name: 'Ork',           hp: 220,  dmg: 34,  atkMs: 1900, moveMs: 520, xp: 30,  gold: [8, 32],    aggro: 7, pack: true, drops: [{ item: 'sword', p: 0.05 }, { item: 'bow', p: 0.04 }, { item: 'leather', p: 0.05 }, { item: 'leather_helm', p: 0.05 }, { item: 'meat', p: 0.25 }, { item: 'hp_potion', p: 0.1 }, { item: 'bone', p: 0.3 }, { item: 'tusk', p: 0.1 }] },
+  gnoll:     { name: 'Gnoll',         hp: 250,  dmg: 37,  atkMs: 1800, moveMs: 500, xp: 35,  gold: [8, 30],    aggro: 8, pack: true, drops: [{ item: 'club', p: 0.07 }, { item: 'bone', p: 0.35 }, { item: 'leather_helm', p: 0.05 }, { item: 'hp_potion', p: 0.1 }] },
+  troll:     { name: 'Troll',         hp: 280,  dmg: 42,  atkMs: 2100, moveMs: 580, xp: 40,  gold: [12, 42],   aggro: 7, drops: [{ item: 'boots', p: 0.06 }, { item: 'wood_shield', p: 0.06 }, { item: 'meat', p: 0.3 }, { item: 'hp_potion', p: 0.12 }, { item: 'bone', p: 0.35 }] },
+  ghost:     { name: 'Geist',         hp: 250,  dmg: 42,  atkMs: 1700, moveMs: 450, xp: 45,  gold: [10, 45],   aggro: 8, drops: [{ item: 'mp_potion', p: 0.16 }, { item: 'magic_hat', p: 0.02 }, { item: 'rag', p: 0.3 }, { item: 'pearl', p: 0.04 }] },
+  skeleton:  { name: 'Skelett',       hp: 320,  dmg: 46,  atkMs: 1900, moveMs: 560, xp: 48,  gold: [14, 48],   aggro: 8, drops: [{ item: 'axe', p: 0.04 }, { item: 'wand', p: 0.04 }, { item: 'chain', p: 0.04 }, { item: 'iron_helm', p: 0.03 }, { item: 'mp_potion', p: 0.1 }, { item: 'bone', p: 0.6 }, { item: 'skull', p: 0.25 }, { item: 'bone_shield', p: 0.04 }] },
+  crocodile: { name: 'Krokodil',      hp: 330,  dmg: 49,  atkMs: 2000, moveMs: 560, xp: 52,  gold: [5, 20],    aggro: 7, tame: true, drops: [{ item: 'snake_skin', p: 0.5 }, { item: 'meat', p: 0.45 }, { item: 'fur_boots', p: 0.04 }] },
+  king_cobra:{ name: 'Königskobra',   hp: 310,  dmg: 46,  atkMs: 1700, moveMs: 520, xp: 48,  gold: [5, 25],    aggro: 8, tame: true, drops: [{ item: 'snake_skin', p: 0.6 }, { item: 'mp_potion', p: 0.1 }, { item: 'emerald', p: 0.03 }] },
+  pirate:    { name: 'Pirat',         hp: 360,  dmg: 43,  atkMs: 1800, moveMs: 470, xp: 58,  gold: [20, 70],   aggro: 8, pack: true, drops: [{ item: 'sword', p: 0.04 }, { item: 'pearl', p: 0.07 }, { item: 'silver_ring', p: 0.05 }, { item: 'bread', p: 0.2 }, { item: 'bone_helm', p: 0.05 }] },
+  zombie:    { name: 'Zombie',        hp: 400,  dmg: 48,  atkMs: 2100, moveMs: 720, xp: 55,  gold: [18, 55],   aggro: 8, drops: [{ item: 'leather', p: 0.06 }, { item: 'leather_legs', p: 0.05 }, { item: 'hp_potion', p: 0.12 }, { item: 'rag', p: 0.4 }, { item: 'bone', p: 0.3 }] },
+  hunter:    { name: 'Wilderer',      hp: 400,  dmg: 38,  atkMs: 1900, moveMs: 480, xp: 60,  gold: [25, 80],   aggro: 9, kite: true, ranged: { dmg: 48, range: 6, ms: 2300 }, drops: [{ item: 'crossbow', p: 0.05 }, { item: 'ranger_legs', p: 0.04 }, { item: 'meat', p: 0.25 }, { item: 'hp_potion', p: 0.12 }, { item: 'feather', p: 0.3 }, { item: 'wolf_pelt', p: 0.15 }] },
+  witch:     { name: 'Hexe',          hp: 380,  dmg: 34,  atkMs: 1900, moveMs: 470, xp: 66,  gold: [20, 65],   aggro: 8, kite: true, ranged: { dmg: 55, range: 6, ms: 2300 }, drops: [{ item: 'wand', p: 0.05 }, { item: 'magic_hat', p: 0.03 }, { item: 'oak_staff', p: 0.04 }, { item: 'mp_potion', p: 0.2 }] },
+  bear:      { name: 'Bär',           hp: 450,  dmg: 55,  atkMs: 2100, moveMs: 540, xp: 65,  gold: [5, 25],    aggro: 6, tame: true, drops: [{ item: 'meat', p: 0.5 }, { item: 'ham', p: 0.25 }, { item: 'saddle_bear', p: 0.008 }, { item: 'hp_potion', p: 0.15 }, { item: 'bear_fur', p: 0.35 }] },
+  orc_shaman:{ name: 'Ork-Schamane',  hp: 420,  dmg: 38,  atkMs: 1900, moveMs: 500, xp: 72,  gold: [22, 70],   aggro: 8, pack: true, kite: true, ranged: { dmg: 60, range: 5, ms: 2400 }, drops: [{ item: 'oak_staff', p: 0.05 }, { item: 'bone', p: 0.3 }, { item: 'mp_potion', p: 0.2 }, { item: 'bone_helm', p: 0.05 }] },
+  lizardman: { name: 'Echsenkrieger', hp: 500,  dmg: 58,  atkMs: 1900, moveMs: 500, xp: 75,  gold: [25, 75],   aggro: 8, pack: true, drops: [{ item: 'chain', p: 0.06 }, { item: 'iron_shield', p: 0.04 }, { item: 'hp_potion', p: 0.15 }, { item: 'snake_skin', p: 0.4 }, { item: 'emerald', p: 0.03 }] },
+  dark_elf:  { name: 'Dunkelelf',     hp: 480,  dmg: 42,  atkMs: 1800, moveMs: 460, xp: 85,  gold: [30, 90],   aggro: 9, kite: true, ranged: { dmg: 62, range: 6, ms: 2200 }, drops: [{ item: 'elven_bow', p: 0.02 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.2 }, { item: 'silver_ring', p: 0.06 }, { item: 'long_bow', p: 0.05 }] },
+  ghoul:     { name: 'Ghul',          hp: 520,  dmg: 62,  atkMs: 1800, moveMs: 500, xp: 80,  gold: [28, 80],   aggro: 8, pack: true, drops: [{ item: 'chain', p: 0.05 }, { item: 'wild_claws', p: 0.04 }, { item: 'mp_potion', p: 0.14 }, { item: 'bone', p: 0.4 }, { item: 'skull', p: 0.2 }] },
+  panther:   { name: 'Panther',       hp: 520,  dmg: 60,  atkMs: 1600, moveMs: 380, xp: 88,  gold: [5, 25],    aggro: 9, tame: true, drops: [{ item: 'meat', p: 0.4 }, { item: 'panther_claws', p: 0.02 }, { item: 'saddle_panther', p: 0.008 }] },
+  harpy:     { name: 'Harpyie',       hp: 500,  dmg: 52,  atkMs: 1700, moveMs: 400, xp: 90,  gold: [30, 85],   aggro: 9, kite: true, ranged: { dmg: 58, range: 5, ms: 2400 }, drops: [{ item: 'swift_boots', p: 0.015 }, { item: 'mp_potion', p: 0.2 }, { item: 'feather', p: 0.6 }] },
+  orc_berserker: { name: 'Ork-Berserker', hp: 560, dmg: 66, atkMs: 1700, moveMs: 460, xp: 85, gold: [30, 90], aggro: 8, pack: true, drops: [{ item: 'axe', p: 0.05 }, { item: 'chain', p: 0.05 }, { item: 'iron_helm', p: 0.04 }, { item: 'ham', p: 0.15 }, { item: 'hp_potion', p: 0.15 }, { item: 'tusk', p: 0.2 }, { item: 'morning_star', p: 0.04 }] },
+  banshee:   { name: 'Todesfee',      hp: 580,  dmg: 58,  atkMs: 1900, moveMs: 460, xp: 100, gold: [35, 110],  aggro: 8, kite: true, ranged: { dmg: 70, range: 5, ms: 2400 }, drops: [{ item: 'magic_hat', p: 0.04 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.18 }, { item: 'pearl', p: 0.06 }, { item: 'rag', p: 0.35 }] },
+  frost_wolf:{ name: 'Frostwolf',     hp: 620,  dmg: 66,  atkMs: 1700, moveMs: 400, xp: 102, gold: [10, 40],   aggro: 9, tame: true, pack: true, drops: [{ item: 'wolf_pelt', p: 0.5 }, { item: 'saddle_frost_wolf', p: 0.008 }, { item: 'hp_potion', p: 0.12 }, { item: 'fur_boots', p: 0.05 }] },
+  swamp_lurker: { name: 'Sumpfschlurfer', hp: 560, dmg: 62, atkMs: 2000, moveMs: 600, xp: 95, gold: [25, 80],  aggro: 8, drops: [{ item: 'emerald', p: 0.05 }, { item: 'snake_skin', p: 0.3 }, { item: 'hp_potion', p: 0.12 }] },
+  forest_spirit: { name: 'Waldgeist', hp: 700,  dmg: 60,  atkMs: 1900, moveMs: 460, xp: 118, gold: [20, 70],   aggro: 8, kite: true, ranged: { dmg: 75, range: 5, ms: 2300 }, drops: [{ item: 'amber', p: 0.3 }, { item: 'mp_potion', p: 0.2 }, { item: 'oak_staff', p: 0.05 }] },
+  werewolf:  { name: 'Werwolf',       hp: 650,  dmg: 70,  atkMs: 1600, moveMs: 380, xp: 110, gold: [20, 70],   aggro: 9, pack: true, drops: [{ item: 'swift_boots', p: 0.02 }, { item: 'hide_legs', p: 0.04 }, { item: 'meat', p: 0.3 }, { item: 'hp_potion', p: 0.18 }, { item: 'wolf_pelt', p: 0.5 }] },
+  gargoyle:  { name: 'Gargoyle',      hp: 650,  dmg: 63,  atkMs: 1800, moveMs: 480, xp: 108, gold: [20, 70],   aggro: 8, drops: [{ item: 'bone', p: 0.35 }, { item: 'emerald', p: 0.05 }, { item: 'steel_helm', p: 0.03 }] },
+  basilisk:  { name: 'Basilisk',      hp: 720,  dmg: 72,  atkMs: 1800, moveMs: 470, xp: 125, gold: [25, 80],   aggro: 8, drops: [{ item: 'snake_skin', p: 0.55 }, { item: 'emerald', p: 0.06 }, { item: 'scale_armor', p: 0.025 }] },
+  mummy:     { name: 'Mumie',         hp: 750,  dmg: 72,  atkMs: 2000, moveMs: 620, xp: 120, gold: [45, 120],  aggro: 8, drops: [{ item: 'silk_legs', p: 0.05 }, { item: 'fire_wand', p: 0.03 }, { item: 'mp_potion', p: 0.2 }, { item: 'rag', p: 0.5 }, { item: 'gold_necklace', p: 0.05 }] },
   // ---- Oberstufe ----
-  giant_spider: { name: 'Riesenspinne', hp: 850, dmg: 78, atkMs: 1700, moveMs: 420, xp: 140, gold: [40, 120],  aggro: 9, tame: true, pack: true, drops: [{ item: 'saddle_spider', p: 0.008 }, { item: 'ranger_armor', p: 0.025 }, { item: 'mp_potion', p: 0.2 }] },
-  minotaur:  { name: 'Minotaurus',    hp: 950,  dmg: 85,  atkMs: 2100, moveMs: 500, xp: 160, gold: [55, 150],  aggro: 8, drops: [{ item: 'axe', p: 0.07 }, { item: 'iron_shield', p: 0.07 }, { item: 'plate_legs', p: 0.025 }, { item: 'saddle_minotaur', p: 0.008 }, { item: 'ham', p: 0.3 }, { item: 'hp_potion', p: 0.2 }] },
-  ogre:      { name: 'Oger',          hp: 1000, dmg: 88,  atkMs: 2300, moveMs: 580, xp: 165, gold: [50, 145],  aggro: 8, drops: [{ item: 'iron_boots', p: 0.05 }, { item: 'iron_helm', p: 0.06 }, { item: 'ham', p: 0.35 }, { item: 'hp_potion', p: 0.2 }] },
-  cyclops:   { name: 'Zyklop',        hp: 1100, dmg: 92,  atkMs: 2300, moveMs: 580, xp: 175, gold: [50, 145],  aggro: 8, drops: [{ item: 'axe', p: 0.07 }, { item: 'iron_shield', p: 0.06 }, { item: 'iron_helm', p: 0.06 }, { item: 'iron_boots', p: 0.05 }, { item: 'ham', p: 0.25 }, { item: 'hp_potion', p: 0.2 }] },
-  vampire:   { name: 'Vampir',        hp: 1300, dmg: 100, atkMs: 1700, moveMs: 440, xp: 220, gold: [70, 200],  aggro: 9, drops: [{ item: 'robe', p: 0.03 }, { item: 'elven_bow', p: 0.025 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.25 }] },
-  golem:     { name: 'Steingolem',    hp: 1450, dmg: 90,  atkMs: 2400, moveMs: 700, xp: 240, gold: [55, 170],  aggro: 7, drops: [{ item: 'plate_legs', p: 0.035 }, { item: 'iron_shield', p: 0.07 }, { item: 'saddle_golem', p: 0.008 }, { item: 'plate', p: 0.025 }] },
-  dark_knight: { name: 'Dunkler Ritter', hp: 1650, dmg: 110, atkMs: 1900, moveMs: 480, xp: 300, gold: [90, 240], aggro: 9, drops: [{ item: 'sword', p: 0.1 }, { item: 'plate', p: 0.04 }, { item: 'plate_legs', p: 0.04 }, { item: 'iron_shield', p: 0.08 }, { item: 'hp_potion', p: 0.3 }] },
-  yeti:      { name: 'Yeti',          hp: 1800, dmg: 115, atkMs: 2200, moveMs: 520, xp: 320, gold: [80, 220],  aggro: 8, drops: [{ item: 'swift_boots', p: 0.03 }, { item: 'beast_hide', p: 0.035 }, { item: 'ham', p: 0.4 }, { item: 'hp_potion', p: 0.3 }] },
-  fire_elemental: { name: 'Feuerelementar', hp: 1900, dmg: 120, atkMs: 1900, moveMs: 500, xp: 350, gold: [90, 260], aggro: 9, kite: true, ranged: { dmg: 85, range: 5, ms: 2400 }, drops: [{ item: 'fire_wand', p: 0.05 }, { item: 'fire_sword', p: 0.04 }, { item: 'mp_potion', p: 0.35 }] },
-  wyrm:      { name: 'Wyrm',          hp: 2200, dmg: 125, atkMs: 2100, moveMs: 480, xp: 450, gold: [120, 340], aggro: 9, ranged: { dmg: 90, range: 5, ms: 2600 }, drops: [{ item: 'storm_staff', p: 0.035 }, { item: 'dragon_shield', p: 0.05 }, { item: 'saddle_wyrm', p: 0.008 }, { item: 'mp_potion', p: 0.35 }] },
-  dragon:    { name: 'Drache',        hp: 2600, dmg: 135, atkMs: 2100, moveMs: 500, xp: 550, gold: [140, 400], aggro: 9, ranged: { dmg: 95, range: 5, ms: 2700 }, drops: [{ item: 'fire_sword', p: 0.08 }, { item: 'elven_bow', p: 0.05 }, { item: 'plate', p: 0.06 }, { item: 'dragon_shield', p: 0.07 }, { item: 'dragon_helm', p: 0.07 }, { item: 'saddle_dragon', p: 0.015 }, { item: 'ham', p: 0.5 }] },
-  lich:      { name: 'Lich',          hp: 2800, dmg: 115, atkMs: 2000, moveMs: 550, xp: 650, gold: [180, 480], aggro: 9, kite: true, ranged: { dmg: 130, range: 6, ms: 2400 }, drops: [{ item: 'demon_staff', p: 0.04 }, { item: 'storm_staff', p: 0.07 }, { item: 'magic_hat', p: 0.1 }, { item: 'robe', p: 0.05 }, { item: 'mp_potion', p: 0.5 }] },
-  demon:     { name: 'Dämon',         hp: 3400, dmg: 165, atkMs: 2200, moveMs: 500, xp: 900, gold: [260, 700], aggro: 9, ranged: { dmg: 115, range: 5, ms: 2500 }, drops: [{ item: 'demon_blade', p: 0.05 }, { item: 'demon_bow', p: 0.05 }, { item: 'demon_staff', p: 0.05 }, { item: 'demon_claws', p: 0.05 }, { item: 'demon_plate', p: 0.06 }, { item: 'swift_boots', p: 0.1 }, { item: 'hp_potion', p: 0.5 }, { item: 'mp_potion', p: 0.5 }] },
+  giant_spider: { name: 'Riesenspinne', hp: 850, dmg: 78, atkMs: 1700, moveMs: 420, xp: 140, gold: [40, 120],  aggro: 9, tame: true, pack: true, drops: [{ item: 'saddle_spider', p: 0.008 }, { item: 'ranger_armor', p: 0.025 }, { item: 'mp_potion', p: 0.2 }, { item: 'spider_silk', p: 0.6 }] },
+  treant:    { name: 'Baumhirte',     hp: 950,  dmg: 76,  atkMs: 2300, moveMs: 680, xp: 150, gold: [10, 50],   aggro: 7, drops: [{ item: 'amber', p: 0.25 }, { item: 'oak_staff', p: 0.06 }, { item: 'hp_potion', p: 0.15 }] },
+  minotaur:  { name: 'Minotaurus',    hp: 950,  dmg: 85,  atkMs: 2100, moveMs: 500, xp: 160, gold: [55, 150],  aggro: 8, drops: [{ item: 'axe', p: 0.07 }, { item: 'iron_shield', p: 0.07 }, { item: 'plate_legs', p: 0.025 }, { item: 'saddle_minotaur', p: 0.008 }, { item: 'ham', p: 0.3 }, { item: 'hp_potion', p: 0.2 }, { item: 'tusk', p: 0.35 }, { item: 'bone', p: 0.3 }] },
+  sabertooth:{ name: 'Säbelzahntiger', hp: 980, dmg: 88,  atkMs: 1800, moveMs: 420, xp: 168, gold: [10, 45],   aggro: 9, tame: true, drops: [{ item: 'tusk', p: 0.5 }, { item: 'meat', p: 0.5 }, { item: 'saddle_tiger', p: 0.008 }, { item: 'fur_boots', p: 0.06 }] },
+  ogre:      { name: 'Oger',          hp: 1000, dmg: 88,  atkMs: 2300, moveMs: 580, xp: 165, gold: [50, 145],  aggro: 8, drops: [{ item: 'iron_boots', p: 0.05 }, { item: 'iron_helm', p: 0.06 }, { item: 'ham', p: 0.35 }, { item: 'hp_potion', p: 0.2 }, { item: 'bone', p: 0.4 }, { item: 'tusk', p: 0.2 }, { item: 'club', p: 0.08 }] },
+  necromancer:{ name: 'Nekromant',    hp: 1000, dmg: 78,  atkMs: 2000, moveMs: 520, xp: 195, gold: [50, 140],  aggro: 9, kite: true, ranged: { dmg: 95, range: 6, ms: 2400 }, drops: [{ item: 'skull', p: 0.6 }, { item: 'crystal_wand', p: 0.04 }, { item: 'robe', p: 0.03 }, { item: 'mp_potion', p: 0.25 }] },
+  cyclops:   { name: 'Zyklop',        hp: 1100, dmg: 92,  atkMs: 2300, moveMs: 580, xp: 175, gold: [50, 145],  aggro: 8, drops: [{ item: 'axe', p: 0.07 }, { item: 'iron_shield', p: 0.06 }, { item: 'iron_helm', p: 0.06 }, { item: 'iron_boots', p: 0.05 }, { item: 'ham', p: 0.25 }, { item: 'hp_potion', p: 0.2 }, { item: 'bone', p: 0.4 }, { item: 'emerald', p: 0.05 }] },
+  cave_bear: { name: 'Höhlenbär',     hp: 1150, dmg: 92,  atkMs: 2100, moveMs: 520, xp: 190, gold: [20, 60],   aggro: 8, tame: true, drops: [{ item: 'bear_fur', p: 0.6 }, { item: 'ham', p: 0.3 }, { item: 'saddle_bear', p: 0.01 }, { item: 'hp_potion', p: 0.18 }] },
+  medusa:    { name: 'Medusa',        hp: 1250, dmg: 92,  atkMs: 1900, moveMs: 480, xp: 225, gold: [55, 150],  aggro: 9, kite: true, ranged: { dmg: 100, range: 5, ms: 2400 }, drops: [{ item: 'snake_skin', p: 0.5 }, { item: 'ruby', p: 0.05 }, { item: 'crystal_circlet', p: 0.04 }, { item: 'crystal_wand', p: 0.04 }] },
+  vampire:   { name: 'Vampir',        hp: 1300, dmg: 100, atkMs: 1700, moveMs: 440, xp: 220, gold: [70, 200],  aggro: 9, drops: [{ item: 'robe', p: 0.03 }, { item: 'elven_bow', p: 0.025 }, { item: 'silk_legs', p: 0.04 }, { item: 'mp_potion', p: 0.25 }, { item: 'gold_necklace', p: 0.08 }, { item: 'ruby', p: 0.04 }] },
+  unicorn:   { name: 'Einhorn',       hp: 1300, dmg: 90,  atkMs: 1900, moveMs: 400, xp: 250, gold: [0, 20],    aggro: 5, tame: true, drops: [{ item: 'pearl', p: 0.3 }, { item: 'diamond', p: 0.02 }, { item: 'saddle_unicorn', p: 0.012 }] },
+  golem:     { name: 'Steingolem',    hp: 1450, dmg: 90,  atkMs: 2400, moveMs: 700, xp: 240, gold: [55, 170],  aggro: 7, drops: [{ item: 'plate_legs', p: 0.035 }, { item: 'iron_shield', p: 0.07 }, { item: 'saddle_golem', p: 0.008 }, { item: 'plate', p: 0.025 }, { item: 'emerald', p: 0.07 }, { item: 'diamond', p: 0.02 }] },
+  ice_golem: { name: 'Eisgolem',      hp: 1550, dmg: 96,  atkMs: 2400, moveMs: 680, xp: 265, gold: [50, 150],  aggro: 7, drops: [{ item: 'diamond', p: 0.03 }, { item: 'frost_blade', p: 0.015 }, { item: 'scale_legs', p: 0.03 }, { item: 'steel_shield', p: 0.04 }] },
+  shadow_assassin: { name: 'Schattenmeuchler', hp: 1550, dmg: 125, atkMs: 1500, moveMs: 380, xp: 330, gold: [70, 200], aggro: 9, drops: [{ item: 'swift_boots', p: 0.04 }, { item: 'ruby', p: 0.05 }, { item: 'panther_claws', p: 0.04 }, { item: 'steel_boots', p: 0.04 }] },
+  storm_eagle: { name: 'Sturmadler',  hp: 1500, dmg: 100, atkMs: 1800, moveMs: 380, xp: 280, gold: [40, 140],  aggro: 9, tame: true, kite: true, ranged: { dmg: 90, range: 5, ms: 2300 }, drops: [{ item: 'feather', p: 0.8 }, { item: 'saddle_eagle', p: 0.01 }, { item: 'gold_necklace', p: 0.05 }] },
+  lava_hound:{ name: 'Lavahund',      hp: 1650, dmg: 105, atkMs: 1800, moveMs: 430, xp: 295, gold: [60, 170],  aggro: 9, tame: true, drops: [{ item: 'ruby', p: 0.08 }, { item: 'fire_sword', p: 0.03 }, { item: 'saddle_lava_hound', p: 0.008 }] },
+  dark_knight: { name: 'Dunkler Ritter', hp: 1650, dmg: 110, atkMs: 1900, moveMs: 480, xp: 300, gold: [90, 240], aggro: 9, drops: [{ item: 'sword', p: 0.1 }, { item: 'plate', p: 0.04 }, { item: 'plate_legs', p: 0.04 }, { item: 'iron_shield', p: 0.08 }, { item: 'hp_potion', p: 0.3 }, { item: 'silver_ring', p: 0.08 }, { item: 'ruby', p: 0.05 }, { item: 'battle_hammer', p: 0.03 }] },
+  griffin:   { name: 'Greif',         hp: 1750, dmg: 108, atkMs: 1900, moveMs: 420, xp: 315, gold: [60, 180],  aggro: 8, drops: [{ item: 'feather', p: 0.6 }, { item: 'gold_necklace', p: 0.07 }, { item: 'saddle_griffin', p: 0.01 }, { item: 'hawk_bow', p: 0.04 }] },
+  yeti:      { name: 'Yeti',          hp: 1800, dmg: 115, atkMs: 2200, moveMs: 520, xp: 320, gold: [80, 220],  aggro: 8, drops: [{ item: 'swift_boots', p: 0.03 }, { item: 'beast_hide', p: 0.035 }, { item: 'ham', p: 0.4 }, { item: 'hp_potion', p: 0.3 }, { item: 'bear_fur', p: 0.4 }, { item: 'diamond', p: 0.03 }] },
+  fire_elemental: { name: 'Feuerelementar', hp: 1900, dmg: 120, atkMs: 1900, moveMs: 500, xp: 350, gold: [90, 260], aggro: 9, kite: true, ranged: { dmg: 85, range: 5, ms: 2400 }, drops: [{ item: 'fire_wand', p: 0.05 }, { item: 'fire_sword', p: 0.04 }, { item: 'mp_potion', p: 0.35 }, { item: 'ruby', p: 0.08 }, { item: 'amber', p: 0.15 }] },
+  frost_giant: { name: 'Frostriese',  hp: 2150, dmg: 122, atkMs: 2200, moveMs: 540, xp: 430, gold: [80, 240],  aggro: 8, drops: [{ item: 'battle_hammer', p: 0.05 }, { item: 'frost_helm', p: 0.035 }, { item: 'diamond', p: 0.04 }, { item: 'ham', p: 0.3 }] },
+  mammoth:   { name: 'Mammut',        hp: 2000, dmg: 110, atkMs: 2300, moveMs: 560, xp: 380, gold: [40, 150],  aggro: 7, tame: true, drops: [{ item: 'tusk', p: 0.8 }, { item: 'ham', p: 0.5 }, { item: 'saddle_mammoth', p: 0.012 }, { item: 'wool', p: 0.3 }] },
+  dire_wolf: { name: 'Schattenwolf',  hp: 2400, dmg: 135, atkMs: 1700, moveMs: 380, xp: 520, gold: [60, 200],  aggro: 9, tame: true, pack: true, drops: [{ item: 'wolf_pelt', p: 0.8 }, { item: 'swift_boots', p: 0.03 }, { item: 'diamond', p: 0.03 }] },
+  wyrm:      { name: 'Wyrm',          hp: 2200, dmg: 125, atkMs: 2100, moveMs: 480, xp: 450, gold: [120, 340], aggro: 9, ranged: { dmg: 90, range: 5, ms: 2600 }, drops: [{ item: 'storm_staff', p: 0.035 }, { item: 'dragon_shield', p: 0.05 }, { item: 'saddle_wyrm', p: 0.008 }, { item: 'mp_potion', p: 0.35 }, { item: 'dragon_scale', p: 0.3 }, { item: 'emerald', p: 0.06 }] },
+  dragon:    { name: 'Drache',        hp: 2600, dmg: 135, atkMs: 2100, moveMs: 500, xp: 550, gold: [140, 400], aggro: 9, ranged: { dmg: 95, range: 5, ms: 2700 }, drops: [{ item: 'fire_sword', p: 0.08 }, { item: 'elven_bow', p: 0.05 }, { item: 'plate', p: 0.06 }, { item: 'dragon_shield', p: 0.07 }, { item: 'dragon_helm', p: 0.07 }, { item: 'saddle_dragon', p: 0.015 }, { item: 'ham', p: 0.5 }, { item: 'dragon_scale', p: 0.6 }, { item: 'ruby', p: 0.08 }, { item: 'dragon_boots', p: 0.03 }] },
+  phoenix:   { name: 'Phönix',        hp: 2650, dmg: 132, atkMs: 2000, moveMs: 420, xp: 610, gold: [140, 400], aggro: 9, ranged: { dmg: 95, range: 5, ms: 2500 }, drops: [{ item: 'phoenix_bow', p: 0.04 }, { item: 'phoenix_claws', p: 0.04 }, { item: 'phoenix_boots', p: 0.03 }, { item: 'feather', p: 0.8 }, { item: 'ruby', p: 0.1 }, { item: 'saddle_phoenix', p: 0.01 }] },
+  lich:      { name: 'Lich',          hp: 2800, dmg: 115, atkMs: 2000, moveMs: 550, xp: 650, gold: [180, 480], aggro: 9, kite: true, ranged: { dmg: 130, range: 6, ms: 2400 }, drops: [{ item: 'demon_staff', p: 0.04 }, { item: 'storm_staff', p: 0.07 }, { item: 'magic_hat', p: 0.1 }, { item: 'robe', p: 0.05 }, { item: 'mp_potion', p: 0.5 }, { item: 'skull', p: 0.6 }, { item: 'diamond', p: 0.05 }] },
+  frost_dragon: { name: 'Frostdrache', hp: 2950, dmg: 140, atkMs: 2100, moveMs: 500, xp: 640, gold: [150, 420], aggro: 9, ranged: { dmg: 100, range: 5, ms: 2600 }, drops: [{ item: 'frost_blade', p: 0.05 }, { item: 'frost_staff', p: 0.04 }, { item: 'frost_claws', p: 0.04 }, { item: 'dragon_scale', p: 0.35 }, { item: 'dragon_shield', p: 0.05 }, { item: 'saddle_frost_dragon', p: 0.012 }, { item: 'diamond', p: 0.06 }] },
+  shadow_demon: { name: 'Schattendämon', hp: 3100, dmg: 152, atkMs: 2100, moveMs: 470, xp: 780, gold: [220, 600], aggro: 9, drops: [{ item: 'demon_horn', p: 0.35 }, { item: 'shadow_robe', p: 0.045 }, { item: 'storm_bow', p: 0.03 }, { item: 'mp_potion', p: 0.4 }] },
+  reaper:    { name: 'Sensenmann',    hp: 3300, dmg: 162, atkMs: 2100, moveMs: 500, xp: 860, gold: [240, 640], aggro: 9, drops: [{ item: 'skull', p: 0.8 }, { item: 'royal_legs', p: 0.03 }, { item: 'demon_staff', p: 0.04 }, { item: 'titan_staff', p: 0.015 }] },
+  spectral_dragon: { name: 'Geisterdrache', hp: 3200, dmg: 150, atkMs: 2000, moveMs: 480, xp: 820, gold: [220, 600], aggro: 9, ranged: { dmg: 110, range: 5, ms: 2500 }, drops: [{ item: 'storm_staff', p: 0.06 }, { item: 'titan_staff', p: 0.02 }, { item: 'dragon_scale', p: 0.5 }, { item: 'diamond', p: 0.08 }, { item: 'mp_potion', p: 0.4 }] },
+  demon:     { name: 'Dämon',         hp: 3400, dmg: 165, atkMs: 2200, moveMs: 500, xp: 900, gold: [260, 700], aggro: 9, ranged: { dmg: 115, range: 5, ms: 2500 }, drops: [{ item: 'demon_blade', p: 0.05 }, { item: 'demon_bow', p: 0.05 }, { item: 'demon_staff', p: 0.05 }, { item: 'demon_claws', p: 0.05 }, { item: 'demon_plate', p: 0.06 }, { item: 'swift_boots', p: 0.1 }, { item: 'hp_potion', p: 0.5 }, { item: 'mp_potion', p: 0.5 }, { item: 'demon_horn', p: 0.5 }, { item: 'diamond', p: 0.06 }] },
+  obsidian_golem: { name: 'Obsidiangolem', hp: 3700, dmg: 148, atkMs: 2400, moveMs: 650, xp: 920, gold: [200, 560], aggro: 8, drops: [{ item: 'royal_shield', p: 0.035 }, { item: 'diamond', p: 0.1 }, { item: 'emerald', p: 0.2 }, { item: 'titan_sword', p: 0.012 }] },
+
+  // ---- BOSSE (Spezial-Spawnsystem, siehe game.js) ----
+  boss_spider_queen: { name: '👑 Spinnenkönigin', boss: true, hp: 9000, dmg: 150, atkMs: 1800, moveMs: 460, xp: 3200, gold: [800, 1600], aggro: 10, pack: true,
+    drops: [{ item: 'spider_silk', p: 1 }, { item: 'saddle_spider', p: 0.35 }, { item: 'ranger_armor', p: 0.3 }, { item: 'emerald', p: 0.5 }, { item: 'ruby', p: 0.3 }, { item: 'hawk_bow', p: 0.2 }] },
+  boss_orc_warlord: { name: '👑 Ork-Kriegsherr', boss: true, hp: 11000, dmg: 170, atkMs: 1900, moveMs: 480, xp: 4200, gold: [1000, 2200], aggro: 10, pack: true,
+    drops: [{ item: 'battle_hammer', p: 0.35 }, { item: 'axe', p: 0.4 }, { item: 'chain', p: 0.4 }, { item: 'steel_helm', p: 0.3 }, { item: 'steel_shield', p: 0.3 }, { item: 'ruby', p: 0.3 }, { item: 'tusk', p: 1 }] },
+  boss_yeti_king: { name: '👑 Yeti-König', boss: true, hp: 14000, dmg: 195, atkMs: 2100, moveMs: 500, xp: 5600, gold: [1200, 2600], aggro: 10,
+    drops: [{ item: 'frost_blade', p: 0.3 }, { item: 'frost_staff', p: 0.25 }, { item: 'frost_helm', p: 0.35 }, { item: 'frost_claws', p: 0.25 }, { item: 'diamond', p: 0.5 }, { item: 'bear_fur', p: 1 }] },
+  boss_lich_king: { name: '👑 Lichkönig', boss: true, hp: 16000, dmg: 205, atkMs: 2000, moveMs: 520, xp: 6800, gold: [1500, 3200], aggro: 10, kite: true, ranged: { dmg: 170, range: 6, ms: 2300 },
+    drops: [{ item: 'titan_staff', p: 0.2 }, { item: 'storm_staff', p: 0.4 }, { item: 'crown_helm', p: 0.35 }, { item: 'royal_legs', p: 0.3 }, { item: 'diamond', p: 0.5 }, { item: 'skull', p: 1 }] },
+  boss_dragon_lord: { name: '👑 Drachenfürst', boss: true, hp: 18000, dmg: 225, atkMs: 2000, moveMs: 480, xp: 8000, gold: [1800, 3800], aggro: 10, ranged: { dmg: 150, range: 5, ms: 2400 },
+    drops: [{ item: 'saddle_dragon', p: 0.5 }, { item: 'dragon_shield', p: 0.5 }, { item: 'dragon_helm', p: 0.5 }, { item: 'dragon_boots', p: 0.4 }, { item: 'dragon_scale', p: 1 }, { item: 'frost_blade', p: 0.25 }, { item: 'storm_bow', p: 0.25 }, { item: 'ruby', p: 0.6 }] },
+  world_titan: { name: '💀 Uralter Titan', boss: true, worldBoss: true, hp: 40000, dmg: 280, atkMs: 2200, moveMs: 560, xp: 20000, gold: [5000, 9000], aggro: 12, ranged: { dmg: 200, range: 6, ms: 2600 },
+    drops: [{ item: 'titan_heart', p: 1 }, { item: 'titan_sword', p: 0.35 }, { item: 'titan_staff', p: 0.35 }, { item: 'phoenix_bow', p: 0.35 }, { item: 'phoenix_claws', p: 0.35 }, { item: 'royal_plate', p: 0.3 }, { item: 'royal_shield', p: 0.3 }, { item: 'phoenix_boots', p: 0.3 }, { item: 'crown_helm', p: 0.4 }, { item: 'diamond', p: 1 }] },
 };
 
 // voc: nur diese Berufe können es tragen (fehlt = alle)
@@ -65,55 +120,142 @@ const ITEMS = {
   bread:        { name: 'Brot',            kind: 'food', food: 120, price: 20 },
   meat:         { name: 'Fleisch',         kind: 'food', food: 180, price: 35 },
   ham:          { name: 'Schinken',        kind: 'food', food: 300, price: 60 },
+
+  // ---- Sammel-Loot: Trophäen & Schätze (beim Händler verkaufen!) ----
+  rag:          { name: 'Stofffetzen',     kind: 'loot', price: 6 },
+  wool:         { name: 'Wolle',           kind: 'loot', price: 12 },
+  rat_tail:     { name: 'Rattenschwanz',   kind: 'loot', price: 8 },
+  bone:         { name: 'Knochen',         kind: 'loot', price: 10 },
+  feather:      { name: 'Schimmernde Feder', kind: 'loot', price: 16 },
+  skull:        { name: 'Totenschädel',    kind: 'loot', price: 24 },
+  snake_skin:   { name: 'Schlangenhaut',   kind: 'loot', price: 30 },
+  fox_fur:      { name: 'Fuchspelz',       kind: 'loot', price: 36 },
+  tusk:         { name: 'Stoßzahn',        kind: 'loot', price: 40 },
+  spider_silk:  { name: 'Spinnenseide',    kind: 'loot', price: 44 },
+  wolf_pelt:    { name: 'Wolfspelz',       kind: 'loot', price: 50 },
+  bear_fur:     { name: 'Bärenfell',       kind: 'loot', price: 80 },
+  amber:        { name: 'Bernstein',       kind: 'loot', price: 120 },
+  silver_ring:  { name: 'Silberring',      kind: 'loot', price: 170 },
+  pearl:        { name: 'Perle',           kind: 'loot', price: 190 },
+  gold_necklace:{ name: 'Goldkette',       kind: 'loot', price: 380 },
+  emerald:      { name: 'Smaragd',         kind: 'loot', price: 550 },
+  ruby:         { name: 'Rubin',           kind: 'loot', price: 900 },
+  dragon_scale: { name: 'Drachenschuppe',  kind: 'loot', price: 1200 },
+  diamond:      { name: 'Diamant',         kind: 'loot', price: 1800 },
+  demon_horn:   { name: 'Dämonenhorn',     kind: 'loot', price: 2400 },
+  titan_heart:  { name: 'Titanenherz',     kind: 'loot', price: 9000 },
+
+  // ---- Waffen ----
   dagger:       { name: 'Dolch',           kind: 'weapon', atk: 8,  price: 40 },
+  club:         { name: 'Keule',           kind: 'weapon', atk: 12, price: 120, voc: ['knight'] },
   sword:        { name: 'Schwert',         kind: 'weapon', atk: 18, price: 250,  voc: ['knight'] },
+  morning_star: { name: 'Morgenstern',     kind: 'weapon', atk: 22, price: 550,  voc: ['knight'] },
   axe:          { name: 'Kriegsaxt',       kind: 'weapon', atk: 28, price: 900,  voc: ['knight'] },
+  battle_hammer:{ name: 'Kriegshammer',    kind: 'weapon', atk: 34, price: 1900, voc: ['knight'] },
   fire_sword:   { name: 'Feuerschwert',    kind: 'weapon', atk: 42, price: 4000, voc: ['knight'] },
+  frost_blade:  { name: 'Frostklinge',     kind: 'weapon', atk: 48, price: 7500, voc: ['knight'] },
   demon_blade:  { name: 'Dämonenklinge',   kind: 'weapon', atk: 55, price: 12000, voc: ['knight'] },
+  titan_sword:  { name: 'Titanenschwert',  kind: 'weapon', atk: 62, price: 22000, voc: ['knight'] },
   bow:          { name: 'Jagdbogen',       kind: 'weapon', atk: 16, price: 220,  voc: ['paladin'] },
+  long_bow:     { name: 'Langbogen',       kind: 'weapon', atk: 21, price: 550,  voc: ['paladin'] },
   crossbow:     { name: 'Armbrust',        kind: 'weapon', atk: 26, price: 900,  voc: ['paladin'] },
+  hawk_bow:     { name: 'Falkenbogen',     kind: 'weapon', atk: 33, price: 1900, voc: ['paladin'] },
   elven_bow:    { name: 'Elfenbogen',      kind: 'weapon', atk: 40, price: 4000, voc: ['paladin'] },
+  storm_bow:    { name: 'Sturmbogen',      kind: 'weapon', atk: 48, price: 7500, voc: ['paladin'] },
   demon_bow:    { name: 'Dämonenbogen',    kind: 'weapon', atk: 54, price: 12000, voc: ['paladin'] },
+  phoenix_bow:  { name: 'Phönixbogen',     kind: 'weapon', atk: 62, price: 22000, voc: ['paladin'] },
   wand:         { name: 'Zauberstab',      kind: 'weapon', atk: 16, price: 220,  voc: ['sorcerer'] },
+  oak_staff:    { name: 'Eichenstab',      kind: 'weapon', atk: 21, price: 550,  voc: ['sorcerer'] },
   fire_wand:    { name: 'Feuerstab',       kind: 'weapon', atk: 26, price: 900,  voc: ['sorcerer'] },
+  crystal_wand: { name: 'Kristallstab',    kind: 'weapon', atk: 33, price: 1900, voc: ['sorcerer'] },
   storm_staff:  { name: 'Sturmstab',       kind: 'weapon', atk: 40, price: 4000, voc: ['sorcerer'] },
+  frost_staff:  { name: 'Froststab',       kind: 'weapon', atk: 48, price: 7500, voc: ['sorcerer'] },
   demon_staff:  { name: 'Dämonenstab',     kind: 'weapon', atk: 54, price: 12000, voc: ['sorcerer'] },
+  titan_staff:  { name: 'Titanenstab',     kind: 'weapon', atk: 62, price: 22000, voc: ['sorcerer'] },
   claws:        { name: 'Bestien-Handschuhe', kind: 'weapon', atk: 16, price: 220, voc: ['tamer'] },
+  bone_claws:   { name: 'Knochenkrallen',  kind: 'weapon', atk: 21, price: 550,  voc: ['tamer'] },
   wild_claws:   { name: 'Wildkrallen',     kind: 'weapon', atk: 26, price: 900,  voc: ['tamer'] },
+  panther_claws:{ name: 'Pantherkrallen',  kind: 'weapon', atk: 33, price: 1900, voc: ['tamer'] },
   beast_claws:  { name: 'Bestienklauen',   kind: 'weapon', atk: 40, price: 4000, voc: ['tamer'] },
+  frost_claws:  { name: 'Frostkrallen',    kind: 'weapon', atk: 48, price: 7500, voc: ['tamer'] },
   demon_claws:  { name: 'Dämonenkrallen',  kind: 'weapon', atk: 54, price: 12000, voc: ['tamer'] },
+  phoenix_claws:{ name: 'Phönixkrallen',   kind: 'weapon', atk: 62, price: 22000, voc: ['tamer'] },
+
+  // ---- Rüstungen ----
   leather:      { name: 'Lederrüstung',    kind: 'armor', def: 8,  price: 120 },
+  studded:      { name: 'Nietenrüstung',   kind: 'armor', def: 12, price: 420 },
   chain:        { name: 'Kettenrüstung',   kind: 'armor', def: 16, price: 800 },
-  plate:        { name: 'Plattenrüstung',  kind: 'armor', def: 26, price: 3500, voc: ['knight'] },
-  demon_plate:  { name: 'Dämonenrüstung',  kind: 'armor', def: 36, price: 10000, voc: ['knight'] },
-  ranger_armor: { name: 'Waldläufer-Rüstung', kind: 'armor', def: 24, price: 3200, voc: ['paladin'] },
+  scale_armor:  { name: 'Schuppenrüstung', kind: 'armor', def: 20, price: 1700 },
   robe:         { name: 'Magierrobe',      kind: 'armor', def: 22, price: 3000, voc: ['sorcerer'] },
+  ranger_armor: { name: 'Waldläufer-Rüstung', kind: 'armor', def: 24, price: 3200, voc: ['paladin'] },
   beast_hide:   { name: 'Bestienfell',     kind: 'armor', def: 24, price: 3200, voc: ['tamer'] },
+  plate:        { name: 'Plattenrüstung',  kind: 'armor', def: 26, price: 3500, voc: ['knight'] },
+  shadow_robe:  { name: 'Schattenrobe',    kind: 'armor', def: 28, price: 6000, voc: ['sorcerer'] },
+  storm_mail:   { name: 'Sturmharnisch',   kind: 'armor', def: 29, price: 6200, voc: ['paladin'] },
+  titan_hide:   { name: 'Titanenfell',     kind: 'armor', def: 29, price: 6200, voc: ['tamer'] },
+  frost_plate:  { name: 'Frostpanzer',     kind: 'armor', def: 31, price: 6500, voc: ['knight'] },
+  demon_plate:  { name: 'Dämonenrüstung',  kind: 'armor', def: 36, price: 10000, voc: ['knight'] },
+  royal_plate:  { name: 'Königsharnisch',  kind: 'armor', def: 42, price: 20000, voc: ['knight'] },
+
+  // ---- Hosen ----
   cloth_legs:   { name: 'Stoffhose',       kind: 'legs', def: 3,  price: 50 },
   leather_legs: { name: 'Lederhose',       kind: 'legs', def: 6,  price: 300 },
-  plate_legs:   { name: 'Plattenbeinschutz', kind: 'legs', def: 14, price: 2500, voc: ['knight'] },
+  chain_legs:   { name: 'Kettenbeinschutz', kind: 'legs', def: 9, price: 750 },
   ranger_legs:  { name: 'Waldläufer-Hose', kind: 'legs', def: 12, price: 2200, voc: ['paladin'] },
   silk_legs:    { name: 'Seidenhose',      kind: 'legs', def: 12, price: 2200, voc: ['sorcerer'] },
   hide_legs:    { name: 'Fellhose',        kind: 'legs', def: 12, price: 2200, voc: ['tamer'] },
+  plate_legs:   { name: 'Plattenbeinschutz', kind: 'legs', def: 14, price: 2500, voc: ['knight'] },
+  scale_legs:   { name: 'Schuppenhose',    kind: 'legs', def: 16, price: 3200 },
+  royal_legs:   { name: 'Königsbeinschutz', kind: 'legs', def: 21, price: 9000 },
+
+  // ---- Helme ----
   leather_helm: { name: 'Lederkappe',      kind: 'helmet', def: 4,  price: 80 },
-  iron_helm:    { name: 'Eisenhelm',       kind: 'helmet', def: 9,  price: 600 },
+  bone_helm:    { name: 'Knochenhelm',     kind: 'helmet', def: 6,  price: 260 },
   magic_hat:    { name: 'Magierhut',       kind: 'helmet', def: 7,  price: 900, voc: ['sorcerer'] },
+  iron_helm:    { name: 'Eisenhelm',       kind: 'helmet', def: 9,  price: 600 },
+  steel_helm:   { name: 'Stahlhelm',       kind: 'helmet', def: 12, price: 1600 },
+  crystal_circlet: { name: 'Kristallreif', kind: 'helmet', def: 14, price: 3200, voc: ['sorcerer'] },
   dragon_helm:  { name: 'Drachenhelm',     kind: 'helmet', def: 16, price: 3000 },
+  crown_helm:   { name: 'Kronenhelm',      kind: 'helmet', def: 19, price: 5500 },
+  frost_helm:   { name: 'Frosthelm',       kind: 'helmet', def: 22, price: 9500 },
+
+  // ---- Schilde ----
   torch:        { name: 'Fackel',          kind: 'shield', def: 1, light: true, price: 30 },
   wood_shield:  { name: 'Holzschild',      kind: 'shield', def: 6,  price: 100 },
+  bone_shield:  { name: 'Knochenschild',   kind: 'shield', def: 9,  price: 420 },
   iron_shield:  { name: 'Eisenschild',     kind: 'shield', def: 12, price: 900 },
+  steel_shield: { name: 'Stahlschild',     kind: 'shield', def: 16, price: 2400 },
   dragon_shield:{ name: 'Drachenschild',   kind: 'shield', def: 20, price: 4500 },
+  royal_shield: { name: 'Königsschild',    kind: 'shield', def: 25, price: 9500 },
+
+  // ---- Stiefel ----
   boots:        { name: 'Lederstiefel',    kind: 'boots', def: 2, price: 60 },
+  fur_boots:    { name: 'Fellstiefel',     kind: 'boots', def: 4, price: 320 },
   iron_boots:   { name: 'Eisenstiefel',    kind: 'boots', def: 6, price: 700 },
+  steel_boots:  { name: 'Stahlstiefel',    kind: 'boots', def: 9, price: 2600 },
   swift_boots:  { name: 'Windstiefel',     kind: 'boots', def: 3, speed: 30, price: 2500 },
+  dragon_boots: { name: 'Drachenstiefel',  kind: 'boots', def: 12, price: 6500 },
+  phoenix_boots:{ name: 'Phönixstiefel',   kind: 'boots', def: 8, speed: 45, price: 13000 },
+
+  // ---- Sättel (Mounts) ----
   saddle_horse:    { name: 'Pferdesattel',      kind: 'mount', mount: 'horse',        price: 2000 },
   saddle_wolf:     { name: 'Wolfssattel',       kind: 'mount', mount: 'wolf',         price: 5000 },
   saddle_bear:     { name: 'Bärensattel',       kind: 'mount', mount: 'bear',         price: 5000 },
+  saddle_panther:  { name: 'Panthersattel',     kind: 'mount', mount: 'panther',      price: 6000 },
+  saddle_frost_wolf: { name: 'Frostwolf-Sattel', kind: 'mount', mount: 'frost_wolf',  price: 7000 },
   saddle_spider:   { name: 'Spinnensattel',     kind: 'mount', mount: 'giant_spider', price: 8000 },
   saddle_minotaur: { name: 'Minotaurus-Sattel', kind: 'mount', mount: 'minotaur',     price: 8000 },
+  saddle_tiger:    { name: 'Säbelzahn-Sattel',  kind: 'mount', mount: 'sabertooth',   price: 9000 },
   saddle_golem:    { name: 'Golem-Sattel',      kind: 'mount', mount: 'golem',        price: 10000 },
+  saddle_unicorn:  { name: 'Einhornsattel',     kind: 'mount', mount: 'unicorn',      price: 12000 },
+  saddle_lava_hound: { name: 'Lavahund-Sattel', kind: 'mount', mount: 'lava_hound',   price: 12000 },
+  saddle_mammoth:  { name: 'Mammut-Sattel',     kind: 'mount', mount: 'mammoth',      price: 14000 },
+  saddle_griffin:  { name: 'Greifensattel',     kind: 'mount', mount: 'griffin',      price: 15000 },
+  saddle_eagle:    { name: 'Sturmadler-Sattel', kind: 'mount', mount: 'storm_eagle',  price: 16000 },
   saddle_wyrm:     { name: 'Wyrm-Sattel',       kind: 'mount', mount: 'wyrm',         price: 15000 },
   saddle_dragon:   { name: 'Drachensattel',     kind: 'mount', mount: 'dragon',       price: 20000 },
+  saddle_frost_dragon: { name: 'Frostdrachen-Sattel', kind: 'mount', mount: 'frost_dragon', price: 25000 },
+  saddle_phoenix:  { name: 'Phönixsattel',      kind: 'mount', mount: 'phoenix',      price: 25000 },
 };
 
 const EQUIP_SLOTS = ['weapon', 'armor', 'legs', 'helmet', 'shield', 'boots'];
@@ -155,21 +297,43 @@ const SPELLS = {
   exevo_natura: { name: 'Exevo Natura',     words: 'exevo natura',     desc: 'Dornensturm (Radius 2)',             lvl: 22, mana: 120, cd: 9000, radius: 2, kind: 'nova', base: 48, perLvl: 3.6, fx: 'leaf' },
 };
 
+// skills: Trainings-Tempo je Fertigkeit (1.0 = normal).
+// ⚔ atk steigt durch Angriffe, 🛡 shield durch erlittene Treffer,
+// ✨ magic durch verbrauchtes Mana.
 const VOCATIONS = {
   knight:   { name: 'Ritter',         desc: 'Viel Leben, starker Nahkampf',        hp: 180, mp: 40,  hpL: 32, mpL: 10, melee: 1.35, spell: 0.9,  range: 1, atkFx: 'slash',
+              skills: { atk: 1.5, shield: 1.4, magic: 0.35 },
               spells: ['exura', 'exori_ico', 'exori', 'utamo', 'utito', 'exori_gran', 'exori_mas', 'utevo_lux', 'utani_hur', 'exura_gran'] },
-  paladin:  { name: 'Paladin',        desc: 'Kämpft mit Wurfspeeren auf Distanz',  hp: 150, mp: 70,  hpL: 24, mpL: 18, melee: 1.10, spell: 1.15, range: 5, atkFx: 'spear',
+  paladin:  { name: 'Paladin',        desc: 'Kämpft mit Wurfspeeren auf Distanz',  hp: 150, mp: 70,  hpL: 24, mpL: 18, melee: 1.15, spell: 1.15, range: 5, atkFx: 'spear',
+              skills: { atk: 1.2, shield: 1.1, magic: 0.8 },
               spells: ['exura', 'exori_san', 'exori_con', 'utura', 'exevo_san', 'exevo_mas_san', 'utamo', 'utevo_lux', 'utani_hur', 'exura_gran'] },
   sorcerer: { name: 'Magier',         desc: 'Magische Geschosse, mächtige Zauber', hp: 120, mp: 110, hpL: 16, mpL: 30, melee: 0.85, spell: 1.5,  range: 4, atkFx: 'zap',
+              skills: { atk: 0.5, shield: 0.7, magic: 1.5 },
               spells: ['exura', 'exori_flam', 'exori_vis', 'exevo_gran', 'exori_frigo', 'exevo_mas', 'exevo_ultra', 'utevo_lux', 'utani_hur', 'exura_gran'] },
-  tamer:    { name: 'Bestienzüchter', desc: 'Zähmt Bestien, die für ihn kämpfen',  hp: 140, mp: 90,  hpL: 22, mpL: 22, melee: 0.95, spell: 1.1,  range: 3, atkFx: 'leaf',
+  tamer:    { name: 'Bestienzüchter', desc: 'Zähmt Bestien, die für ihn kämpfen',  hp: 140, mp: 90,  hpL: 22, mpL: 22, melee: 1.0,  spell: 1.1,  range: 3, atkFx: 'leaf',
+              skills: { atk: 0.9, shield: 1.0, magic: 1.0 },
               spells: ['utevo_bestia', 'exura', 'exori_bestia', 'exura_bestia', 'exori_natura', 'utito_bestia', 'exevo_natura', 'utevo_lux', 'utani_hur', 'exura_gran'] },
 };
 
+// ---- Fertigkeiten (Skills) ----
+// atk/shield starten bei Stufe 10, magic bei 0 (wie in Tibia).
+// Rückgabe: Punkte, die für die NÄCHSTE Stufe nötig sind.
+function skillNext(kind, lvl) {
+  if (kind === 'magic') return Math.round(120 * Math.pow(1.28, lvl)); // Punkte = verbrauchtes Mana
+  return Math.round(40 * Math.pow(1.22, lvl - 10));                    // Punkte = Treffer
+}
+const SKILL_CAP = 60;
+// Zähmen: nötiges Magie-Level je nach Stärke der Bestie
+function tameMlRequired(monsterHp) {
+  return monsterHp <= 100 ? 0 : monsterHp <= 500 ? 4 : monsterHp <= 1000 ? 8 : monsterHp <= 1800 ? 14 : 20;
+}
+// Gezähmte Tiere starten höher, je höher das Magie-Level
+function tameStartLevel(ml) { return 1 + Math.floor(ml / 6); }
+
 const SHOP_ITEMS = [
   'hp_potion', 'mp_potion', 'bread', 'torch',
-  'dagger', 'sword', 'bow', 'wand', 'claws',
-  'leather', 'cloth_legs', 'leather_legs', 'leather_helm', 'wood_shield', 'boots',
+  'dagger', 'club', 'sword', 'bow', 'wand', 'claws',
+  'leather', 'studded', 'cloth_legs', 'leather_legs', 'leather_helm', 'bone_helm', 'wood_shield', 'boots', 'fur_boots',
 ];
 
 const QUESTS = {
@@ -215,4 +379,5 @@ function petXpForLevel(lvl) { return Math.round(80 * Math.pow(lvl - 1, 2.1)); }
 module.exports = {
   TILE, WALKABLE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS,
   SHOP_ITEMS, QUESTS, MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
+  skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 };
