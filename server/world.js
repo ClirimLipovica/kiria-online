@@ -429,9 +429,74 @@ function generateWorld(seed = 20260702) {
 
   const templeSpawn = towns[0].temple;
 
-  // ---- Boss-Höhlen: umschlossene Höhlen mit Zufahrt zur nächsten Stadt ----
-  // Der Boss + seine Wachen erscheinen nur, wenn ein Spieler mit der
-  // passenden Quest die Höhle betritt (Logik in game.js).
+  // ================================================================
+  //  EBENEN-SYSTEM: 6 Stockwerke (z = -3..+2)
+  //  UG voller Fels (Höhlen werden gecarvt), OG leere Luft (Plateaus).
+  //  Treppen verbinden die Ebenen: STAIR_DOWN oben <-> STAIR_UP unten.
+  // ================================================================
+  const F = (z) => z + 3;
+  const floors = [];
+  for (let z = -3; z <= 2; z++) {
+    if (z === 0) { floors.push({ tiles, heights }); continue; }
+    floors.push({
+      tiles: new Uint8Array(SIZE * SIZE).fill(z < 0 ? TILE.ROCK : TILE.VOID),
+      heights: new Uint8Array(SIZE * SIZE).fill(z < 0 ? 4 : 0),
+    });
+  }
+  const TF = (z) => floors[F(z)].tiles;
+  const HF = (z) => floors[F(z)].heights;
+  const setT = (z, x, y, t, h) => { if (!inB(x, y)) return; TF(z)[idx(x, y)] = t; HF(z)[idx(x, y)] = h; };
+
+  // Runde Kaverne: Boden freischlagen (UG) bzw. Plateau mit Felskranz (OG)
+  const carveCavern = (z, cx, cy, r, opts = {}) => {
+    const floorTile = opts.floor !== undefined ? opts.floor : TILE.DIRT;
+    for (let y = cy - r - 1; y <= cy + r + 1; y++) {
+      for (let x = cx - r - 1; x <= cx + r + 1; x++) {
+        if (!inB(x, y)) continue;
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < r - 0.5) {
+          const t = opts.lavaP && rand() < opts.lavaP ? TILE.LAVA : floorTile;
+          setT(z, x, y, t, t === TILE.LAVA ? 0 : 1);
+        } else if (d < r + 1.2 && z > 0 && TF(z)[idx(x, y)] === TILE.VOID) {
+          setT(z, x, y, TILE.ROCK, 3); // Felskranz am Plateaurand
+        }
+      }
+    }
+  };
+  // L-förmiger Verbindungstunnel (Breite 2)
+  const carveTunnel = (z, x1, y1, x2, y2) => {
+    const dig = (x, y) => {
+      for (const [ox, oy] of [[0, 0], [1, 0], [0, 1]]) {
+        const tx = x + ox, ty = y + oy;
+        if (!inB(tx, ty)) continue;
+        const t = TF(z)[idx(tx, ty)];
+        if (t === TILE.ROCK || t === TILE.VOID || t === TILE.WALL) setT(z, tx, ty, TILE.DIRT, 1);
+      }
+    };
+    for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) dig(x, y1);
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) dig(x2, y);
+  };
+  // Treppe: STAIR_DOWN auf zUpper an (x,y) <-> STAIR_UP auf zUpper-1 an (x,y).
+  // Rundherum wird auf beiden Ebenen Boden freigeräumt (Landeplatz).
+  const stairs = [];
+  const linkDown = (zUpper, x, y) => {
+    setT(zUpper, x, y, TILE.STAIR_DOWN, 1);
+    setT(zUpper - 1, x, y, TILE.STAIR_UP, 1);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const ux = x + dx, uy = y + dy;
+        if (!inB(ux, uy)) continue;
+        const tU = TF(zUpper)[idx(ux, uy)];
+        if ([TILE.ROCK, TILE.VOID, TILE.TREE, TILE.WATER, TILE.WALL].includes(tU)) setT(zUpper, ux, uy, TILE.DIRT, 1);
+        const tL = TF(zUpper - 1)[idx(ux, uy)];
+        if ([TILE.ROCK, TILE.VOID, TILE.WALL].includes(tL)) setT(zUpper - 1, ux, uy, TILE.DIRT, 1);
+      }
+    }
+    stairs.push({ x, y, zTop: zUpper, zBottom: zUpper - 1 });
+  };
+
+  // ---- Oberirdische Eingangs-Vorhöhlen (mit Straßenanbindung, aus v10.1) ----
   const carveCave = (cx, cy, r) => {
     for (let y = cy - r - 1; y <= cy + r + 1; y++) {
       for (let x = cx - r - 1; x <= cx + r + 1; x++) {
@@ -442,38 +507,183 @@ function generateWorld(seed = 20260702) {
       }
     }
   };
-  const bossCaves = [
-    { type: 'boss_spider_queen', quest: 'bq_spider', cx: 200,  cy: 462,  r: 7, sx: 300,  sy: 320, zone: 'in der Spinnenhöhle bei Eichwald' },
-    { type: 'boss_orc_warlord',  quest: 'bq_orc',    cx: 440,  cy: 1024, r: 7, sx: 440,  sy: 960, zone: 'in der Kriegshöhle bei der Ork-Festung' },
-    { type: 'boss_yeti_king',    quest: 'bq_yeti',   cx: 700,  cy: 58,   r: 7, sx: 700,  sy: 180, zone: 'in der Eishöhle im hohen Norden' },
-    { type: 'boss_lich_king',    quest: 'bq_lich',   cx: 965,  cy: 648,  r: 7, sx: 900,  sy: 690, zone: 'in der Gruft tief in den Ruinen' },
-    { type: 'boss_dragon_lord',  quest: 'bq_dragon', cx: 1090, cy: 92,   r: 7, sx: 1040, sy: 140, zone: 'im Drachenhort im Nordosten' },
+  const entranceCaves = [
+    { cx: 200,  cy: 462,  r: 6, sx: 300,  sy: 320 },  // -> Spinnentiefe
+    { cx: 440,  cy: 1024, r: 6, sx: 440,  sy: 960 },  // -> Kriegsmine
+    { cx: 700,  cy: 58,   r: 6, sx: 700,  sy: 180 },  // -> Eishöhle
+    { cx: 965,  cy: 648,  r: 6, sx: 900,  sy: 690 },  // -> Katakomben
+    { cx: 1090, cy: 92,   r: 6, sx: 1040, sy: 140 },  // -> Drachengrotte
   ];
-  for (const bc of bossCaves) {
+  for (const bc of entranceCaves) {
     carveCave(bc.cx, bc.cy, bc.r);
-    roadV(Math.min(bc.cy, bc.sy), Math.max(bc.cy, bc.sy), bc.cx); // vertikaler Ast
-    roadH(Math.min(bc.cx, bc.sx), Math.max(bc.cx, bc.sx), bc.sy); // horizontaler Ast
-    // Höhlenmitte wieder als Boden (die Straße hat sie evtl. überschrieben)
+    roadV(Math.min(bc.cy, bc.sy), Math.max(bc.cy, bc.sy), bc.cx);
+    roadH(Math.min(bc.cx, bc.sx), Math.max(bc.cx, bc.sx), bc.sy);
     tiles[idx(bc.cx, bc.cy)] = TILE.FLOOR; heights[idx(bc.cx, bc.cy)] = 1;
   }
 
-  // ---- Erreichbarkeits-Maske (VOR den Streu-Spawns nötig) ----
-  const reachable = new Uint8Array(SIZE * SIZE);
-  const reachList = [];
+  // ================================================================
+  //  1. UG (z=-1): 8 Höhlensysteme aus mehreren kleinen Kavernen
+  // ================================================================
+  const caveSpawns = []; // {type, count, cx, cy, z, rMin, rMax}
+  const cs = (z, type, count, cx, cy, rMax = 8) => caveSpawns.push({ type, count, cx, cy, z, rMin: 0, rMax });
+
+  // -- Alte Mine (südöstlich von Kiria, Einsteiger-Dungeon) --
+  carveCavern(-1, 620, 620, 8); carveCavern(-1, 655, 625, 7); carveCavern(-1, 640, 655, 9); carveCavern(-1, 668, 652, 6); carveCavern(-1, 612, 650, 6);
+  carveTunnel(-1, 620, 620, 655, 625); carveTunnel(-1, 655, 625, 640, 655); carveTunnel(-1, 640, 655, 668, 652); carveTunnel(-1, 640, 655, 612, 650); carveTunnel(-1, 612, 650, 620, 620);
+  linkDown(0, 620, 612); linkDown(0, 668, 660); linkDown(0, 604, 652); // 3 Eingänge!
+  cs(-1, 'kobold', 16, 640, 640, 20); cs(-1, 'bat', 12, 620, 620, 14); cs(-1, 'slime', 10, 655, 630, 12); cs(-1, 'cave_bear', 6, 640, 655, 10); cs(-1, 'golem', 4, 668, 652, 7);
+
+  // -- Friedhofs-Krypta --
+  carveCavern(-1, 190, 190, 8); carveCavern(-1, 215, 195, 7); carveCavern(-1, 200, 220, 8); carveCavern(-1, 225, 220, 6);
+  carveTunnel(-1, 190, 190, 215, 195); carveTunnel(-1, 215, 195, 200, 220); carveTunnel(-1, 200, 220, 225, 220);
+  linkDown(0, 200, 200); linkDown(0, 226, 224);
+  cs(-1, 'skeleton', 18, 200, 205, 18); cs(-1, 'ghost', 10, 190, 190, 10); cs(-1, 'zombie', 12, 215, 200, 12); cs(-1, 'necromancer', 5, 200, 220, 10);
+
+  // -- Spinnentiefe (unter dem Spinnenwald) + Boss-Raum der Spinnenkönigin --
+  carveCavern(-1, 240, 440, 8); carveCavern(-1, 265, 445, 7); carveCavern(-1, 250, 470, 8); carveCavern(-1, 225, 465, 6);
+  carveCavern(-1, 205, 462, 7);                    // Kaverne unter der Vorhöhle
+  carveCavern(-1, 285, 472, 7, { floor: TILE.FLOOR }); // Boss-Raum
+  carveTunnel(-1, 240, 440, 265, 445); carveTunnel(-1, 265, 445, 250, 470); carveTunnel(-1, 250, 470, 225, 465);
+  carveTunnel(-1, 225, 465, 205, 462); carveTunnel(-1, 250, 470, 285, 472);
+  linkDown(0, 200, 462); linkDown(0, 252, 438);
+  cs(-1, 'giant_spider', 14, 250, 455, 20); cs(-1, 'spider', 10, 240, 440, 12); cs(-1, 'giant_wasp', 8, 265, 448, 10);
+
+  // -- Kriegsmine (unter der Ork-Festung) + Boss-Raum des Kriegsherrn --
+  carveCavern(-1, 430, 950, 8); carveCavern(-1, 455, 955, 7); carveCavern(-1, 440, 980, 8); carveCavern(-1, 415, 975, 6);
+  carveCavern(-1, 440, 1015, 7);                   // Kaverne unter der Vorhöhle
+  carveCavern(-1, 472, 987, 7, { floor: TILE.FLOOR }); // Boss-Raum
+  carveTunnel(-1, 430, 950, 455, 955); carveTunnel(-1, 455, 955, 440, 980); carveTunnel(-1, 440, 980, 415, 975);
+  carveTunnel(-1, 440, 980, 440, 1015); carveTunnel(-1, 440, 980, 472, 987);
+  linkDown(0, 440, 958); linkDown(0, 440, 1024);
+  cs(-1, 'orc', 14, 440, 965, 20); cs(-1, 'orc_berserker', 10, 440, 980, 12); cs(-1, 'orc_shaman', 8, 455, 958, 10);
+
+  // -- Eishöhle (unter den Yeti-Bergen) --
+  carveCavern(-1, 750, 85, 8); carveCavern(-1, 775, 88, 7); carveCavern(-1, 760, 110, 8); carveCavern(-1, 735, 105, 6);
+  carveCavern(-1, 705, 65, 7);                     // Kaverne unter der Eis-Vorhöhle
+  carveTunnel(-1, 750, 85, 775, 88); carveTunnel(-1, 775, 88, 760, 110); carveTunnel(-1, 760, 110, 735, 105); carveTunnel(-1, 735, 105, 705, 65);
+  linkDown(0, 760, 88); linkDown(0, 700, 58);
+  cs(-1, 'frost_wolf', 10, 755, 90, 16); cs(-1, 'ice_golem', 8, 760, 105, 12); cs(-1, 'yeti', 6, 775, 90, 9);
+
+  // -- Katakomben (unter den Ruinen) --
+  carveCavern(-1, 890, 690, 8); carveCavern(-1, 915, 695, 7); carveCavern(-1, 900, 720, 8); carveCavern(-1, 875, 715, 6); carveCavern(-1, 925, 722, 6);
+  carveCavern(-1, 958, 653, 7);                    // Kaverne unter der Gruft-Vorhöhle
+  carveTunnel(-1, 890, 690, 915, 695); carveTunnel(-1, 915, 695, 900, 720); carveTunnel(-1, 900, 720, 875, 715);
+  carveTunnel(-1, 900, 720, 925, 722); carveTunnel(-1, 915, 695, 958, 653);
+  linkDown(0, 900, 700); linkDown(0, 965, 648);
+  cs(-1, 'mummy', 14, 900, 705, 20); cs(-1, 'ghoul', 12, 890, 692, 12); cs(-1, 'banshee', 8, 915, 700, 10); cs(-1, 'vampire', 6, 900, 720, 10);
+
+  // -- Vulkanschlund (unter dem Vulkan) --
+  carveCavern(-1, 1030, 1030, 8, { lavaP: 0.12 }); carveCavern(-1, 1055, 1035, 7, { lavaP: 0.12 }); carveCavern(-1, 1040, 1060, 8, { lavaP: 0.12 }); carveCavern(-1, 1015, 1055, 6);
+  carveTunnel(-1, 1030, 1030, 1055, 1035); carveTunnel(-1, 1055, 1035, 1040, 1060); carveTunnel(-1, 1040, 1060, 1015, 1055);
+  linkDown(0, 1040, 1036); linkDown(0, 1004, 1004);
+  cs(-1, 'lava_hound', 8, 1040, 1040, 16); cs(-1, 'fire_elemental', 8, 1040, 1055, 12);
+
+  // -- Drachengrotte (unter dem Drachenhort) --
+  carveCavern(-1, 1030, 120, 8); carveCavern(-1, 1055, 125, 7); carveCavern(-1, 1040, 150, 8);
+  carveCavern(-1, 1085, 100, 7);                   // Kaverne unter der Hort-Vorhöhle
+  carveTunnel(-1, 1030, 120, 1055, 125); carveTunnel(-1, 1055, 125, 1040, 150); carveTunnel(-1, 1055, 125, 1085, 100);
+  linkDown(0, 1040, 126); linkDown(0, 1090, 92);
+  cs(-1, 'dragon', 4, 1040, 130, 16); cs(-1, 'wyrm', 4, 1030, 122, 10); cs(-1, 'lava_hound', 4, 1055, 128, 9);
+
+  // ================================================================
+  //  2. UG (z=-2): tiefere, gefährlichere Systeme
+  // ================================================================
+  // -- Eisgrotte + Boss-Raum des Yeti-Königs --
+  carveCavern(-2, 750, 105, 8); carveCavern(-2, 775, 110, 7); carveCavern(-2, 760, 132, 8);
+  carveCavern(-2, 733, 130, 7, { floor: TILE.FLOOR }); // Boss-Raum
+  carveTunnel(-2, 750, 105, 775, 110); carveTunnel(-2, 775, 110, 760, 132); carveTunnel(-2, 760, 132, 733, 130);
+  linkDown(-1, 760, 110);
+  cs(-2, 'frost_giant', 6, 760, 115, 16); cs(-2, 'ice_golem', 6, 752, 108, 10); cs(-2, 'mammoth', 5, 770, 125, 10);
+
+  // -- Tiefengruft + Boss-Raum des Lichkönigs --
+  carveCavern(-2, 890, 715, 8); carveCavern(-2, 915, 720, 7); carveCavern(-2, 900, 742, 8);
+  carveCavern(-2, 927, 747, 7, { floor: TILE.FLOOR }); // Boss-Raum
+  carveTunnel(-2, 890, 715, 915, 720); carveTunnel(-2, 915, 720, 900, 742); carveTunnel(-2, 900, 742, 927, 747);
+  linkDown(-1, 900, 720);
+  cs(-2, 'dark_knight', 8, 900, 725, 16); cs(-2, 'vampire', 6, 890, 718, 10); cs(-2, 'reaper', 3, 900, 742, 9); cs(-2, 'spectral_dragon', 2, 915, 724, 8);
+
+  // -- Feuerkammern (Dämonen!) --
+  carveCavern(-2, 1030, 1055, 8, { lavaP: 0.2 }); carveCavern(-2, 1055, 1060, 7, { lavaP: 0.2 }); carveCavern(-2, 1040, 1080, 8, { lavaP: 0.15 });
+  carveTunnel(-2, 1030, 1055, 1055, 1060); carveTunnel(-2, 1055, 1060, 1040, 1080);
+  linkDown(-1, 1040, 1060);
+  cs(-2, 'fire_elemental', 10, 1040, 1062, 16); cs(-2, 'shadow_demon', 4, 1030, 1057, 9); cs(-2, 'obsidian_golem', 4, 1055, 1062, 9); cs(-2, 'demon', 3, 1040, 1080, 8);
+
+  // -- Drachenhort-Tiefen --
+  carveCavern(-2, 1030, 145, 8); carveCavern(-2, 1055, 150, 7); carveCavern(-2, 1040, 172, 8);
+  carveTunnel(-2, 1030, 145, 1055, 150); carveTunnel(-2, 1055, 150, 1040, 172);
+  linkDown(-1, 1040, 150);
+  cs(-2, 'dragon', 5, 1040, 155, 16); cs(-2, 'wyrm', 5, 1032, 148, 10); cs(-2, 'spectral_dragon', 3, 1050, 160, 9);
+
+  // ================================================================
+  //  3. UG (z=-3): das Endgame in der Tiefe
+  // ================================================================
+  // -- Dämonenhallen --
+  carveCavern(-3, 1030, 1075, 9, { lavaP: 0.25 }); carveCavern(-3, 1055, 1080, 8, { lavaP: 0.25 }); carveCavern(-3, 1040, 1100, 9, { lavaP: 0.2 }); carveCavern(-3, 1010, 1095, 7);
+  carveTunnel(-3, 1030, 1075, 1055, 1080); carveTunnel(-3, 1055, 1080, 1040, 1100); carveTunnel(-3, 1040, 1100, 1010, 1095);
+  linkDown(-2, 1040, 1080);
+  cs(-3, 'demon', 8, 1040, 1088, 18); cs(-3, 'shadow_demon', 6, 1030, 1078, 10); cs(-3, 'obsidian_golem', 5, 1055, 1082, 9); cs(-3, 'reaper', 4, 1040, 1100, 10);
+
+  // -- Urdrachen-Schlund + Boss-Raum des Drachenfürsten --
+  carveCavern(-3, 1030, 168, 9); carveCavern(-3, 1055, 172, 8); carveCavern(-3, 1040, 192, 9);
+  carveCavern(-3, 1012, 190, 8, { floor: TILE.FLOOR }); // Boss-Raum
+  carveTunnel(-3, 1030, 168, 1055, 172); carveTunnel(-3, 1055, 172, 1040, 192); carveTunnel(-3, 1040, 192, 1012, 190);
+  linkDown(-2, 1040, 172);
+  cs(-3, 'dragon', 6, 1040, 178, 18); cs(-3, 'frost_dragon', 4, 1032, 170, 10); cs(-3, 'spectral_dragon', 4, 1050, 182, 10); cs(-3, 'wyrm', 4, 1040, 192, 10);
+
+  // ================================================================
+  //  Obergeschosse (z=+1/+2): Berg-Plateaus über der Welt
+  // ================================================================
+  // -- Yeti-Hochplateau (1. OG) --
+  carveCavern(1, 760, 80, 12, { floor: TILE.DIRT });
+  linkDown(1, 752, 84); linkDown(1, 770, 76); // 2 Aufstiege aus dem Yeti-Kessel
+  cs(1, 'yeti', 6, 760, 80, 10); cs(1, 'frost_giant', 4, 755, 76, 8); cs(1, 'frost_wolf', 6, 766, 84, 9);
+
+  // -- Vulkankrater-Rand (1. OG) --
+  carveCavern(1, 1040, 1032, 11, { floor: TILE.DIRT, lavaP: 0.1 });
+  linkDown(1, 1034, 1036); linkDown(1, 1048, 1028);
+  cs(1, 'fire_elemental', 6, 1040, 1032, 9); cs(1, 'phoenix', 3, 1035, 1028, 8); cs(1, 'lava_hound', 5, 1046, 1036, 8); cs(1, 'demon', 2, 1040, 1030, 7);
+
+  // -- Adlerfels (1. OG, über den Bergen bei Steinfels) --
+  carveCavern(1, 904, 248, 13, { floor: TILE.GRASS });
+  linkDown(1, 896, 246); linkDown(1, 912, 258);
+  cs(1, 'griffin', 8, 904, 248, 11); cs(1, 'storm_eagle', 6, 898, 244, 9); cs(1, 'harpy', 8, 910, 252, 10);
+
+  // -- Drachengipfel (2. OG über dem Adlerfels) --
+  carveCavern(2, 904, 240, 9, { floor: TILE.DIRT });
+  linkDown(2, 906, 244); linkDown(2, 898, 236);
+  cs(2, 'frost_dragon', 4, 904, 240, 7); cs(2, 'dragon', 4, 900, 238, 7); cs(2, 'wyrm', 4, 908, 242, 7);
+
+  // -- Sturmgipfel (2. OG über dem Yeti-Hochplateau) --
+  carveCavern(2, 760, 74, 8, { floor: TILE.DIRT });
+  linkDown(2, 758, 78); linkDown(2, 764, 70);
+  cs(2, 'phoenix', 4, 760, 74, 6); cs(2, 'storm_eagle', 5, 757, 72, 6); cs(2, 'frost_dragon', 2, 763, 76, 6);
+
+  // ---- Erreichbarkeits-Maske über ALLE Ebenen (BFS mit Treppen) ----
+  const reachable = [];
+  for (let f = 0; f < 6; f++) reachable.push(new Uint8Array(SIZE * SIZE));
+  const reachList = []; // nur Oberwelt (für Streu-Spawns)
   {
-    const qx = [templeSpawn.x], qy = [templeSpawn.y];
-    reachable[idx(templeSpawn.x, templeSpawn.y)] = 1;
+    const qx = [templeSpawn.x], qy = [templeSpawn.y], qz = [0];
+    reachable[F(0)][idx(templeSpawn.x, templeSpawn.y)] = 1;
     let head = 0;
     while (head < qx.length) {
-      const x = qx[head], y = qy[head]; head++;
+      const x = qx[head], y = qy[head], z = qz[head]; head++;
+      const t = TF(z)[idx(x, y)];
+      // Treppen verbinden die Ebenen
+      if (t === TILE.STAIR_DOWN && z > -3 && !reachable[F(z - 1)][idx(x, y)]) {
+        reachable[F(z - 1)][idx(x, y)] = 1; qx.push(x); qy.push(y); qz.push(z - 1);
+      }
+      if (t === TILE.STAIR_UP && z < 2 && !reachable[F(z + 1)][idx(x, y)]) {
+        reachable[F(z + 1)][idx(x, y)] = 1; qx.push(x); qy.push(y); qz.push(z + 1);
+      }
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= SIZE || ny >= SIZE) continue;
         const ni = idx(nx, ny);
-        if (reachable[ni] || !WALKABLE.has(tiles[ni])) continue;
-        reachable[ni] = 1;
-        qx.push(nx); qy.push(ny);
-        reachList.push(ni);
+        if (reachable[F(z)][ni] || !WALKABLE.has(TF(z)[ni])) continue;
+        reachable[F(z)][ni] = 1;
+        qx.push(nx); qy.push(ny); qz.push(z);
+        if (z === 0) reachList.push(ni);
       }
     }
   }
@@ -546,8 +756,9 @@ function generateWorld(seed = 20260702) {
     { type: 'yeti',     count: 8,  cx: YETI.x, cy: YETI.y, rMin: 0, rMax: 10 },
     { type: 'wyrm',     count: 6,  cx: 600, cy: 128, rMin: 0, rMax: 60 },
     { type: 'dragon',   count: 5,  cx: LAIR.x, cy: LAIR.y, rMin: 0, rMax: 8 },
-    { type: 'fire_elemental', count: 8, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 12 },
-    { type: 'demon',    count: 6,  cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 10 },
+    // Vulkan-Oberfläche ausgedünnt – die Masse lauert jetzt UNTER der Erde
+    { type: 'fire_elemental', count: 5, cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 12 },
+    { type: 'demon',    count: 3,  cx: VOLC.x, cy: VOLC.y, rMin: 0, rMax: 10 },
     // ---- Neue Arten (v9): feste thematische Zonen ----
     { type: 'chicken',  count: 10, cx: farm.x + 12, cy: farm.y + 8, rMin: 0, rMax: 10 },
     { type: 'fox',      count: 10, cx: 350, cy: 350, rMin: 0, rMax: 14 },
@@ -657,10 +868,17 @@ function generateWorld(seed = 20260702) {
   placeScatter(scatterPool, 85, 0);
   placeScatter(elitePool, 35, 90);
 
-  // ---- Boss-Plätze: Höhlen (Spawnsystem + Quest-Kopplung in game.js) ----
-  const bossLairs = bossCaves.map((bc) => ({
-    type: bc.type, x: bc.cx, y: bc.cy, r: 4, quest: bc.quest, zone: bc.zone,
-  }));
+  // Höhlen- und Gipfel-Spawns dazu (haben ein z-Feld)
+  spawns.push(...caveSpawns);
+
+  // ---- Boss-Plätze: tief in der Unterwelt (Quest-Kopplung in game.js) ----
+  const bossLairs = [
+    { type: 'boss_spider_queen', x: 285,  y: 472,  z: -1, r: 4, quest: 'bq_spider', zone: 'in der Spinnentiefe (1. UG unter dem Spinnenwald)' },
+    { type: 'boss_orc_warlord',  x: 472,  y: 987,  z: -1, r: 4, quest: 'bq_orc',    zone: 'in der Kriegsmine (1. UG unter der Ork-Festung)' },
+    { type: 'boss_yeti_king',    x: 733,  y: 130,  z: -2, r: 4, quest: 'bq_yeti',   zone: 'in der Eisgrotte (2. UG unter den Yeti-Bergen)' },
+    { type: 'boss_lich_king',    x: 927,  y: 747,  z: -2, r: 4, quest: 'bq_lich',   zone: 'in der Tiefengruft (2. UG unter den Ruinen)' },
+    { type: 'boss_dragon_lord',  x: 1012, y: 190,  z: -3, r: 4, quest: 'bq_dragon', zone: 'im Urdrachen-Schlund (3. UG unter dem Drachenhort)' },
+  ];
   // Mögliche Erscheinungsorte des Weltbosses (Uralter Titan)
   const worldBossSpots = [
     { x: 576, y: 760, name: 'südlich von Kiria' },
@@ -670,12 +888,18 @@ function generateWorld(seed = 20260702) {
     { x: 860, y: 560, name: 'westlich der Ruinen' },
   ];
 
-  return { size: SIZE, tiles, heights, buildings, spawns, npcs, templeSpawn, towns, fountains, farm, reachable, bossLairs, worldBossSpots };
+  return {
+    size: SIZE, floors, tiles, heights, buildings, spawns, npcs, templeSpawn,
+    towns, fountains, farm, reachable, bossLairs, worldBossSpots, stairs,
+  };
 }
 
-function isWalkable(world, x, y) {
+// Begehbar auf Ebene z? (z = -3..+2, Standard Oberwelt)
+function isWalkable(world, x, y, z = 0) {
   if (x < 0 || y < 0 || x >= world.size || y >= world.size) return false;
-  return WALKABLE.has(world.tiles[y * world.size + x]);
+  const f = world.floors[z + 3];
+  if (!f) return false;
+  return WALKABLE.has(f.tiles[y * world.size + x]);
 }
 
 module.exports = { generateWorld, isWalkable, SIZE };

@@ -8,9 +8,14 @@
 const TILE = {
   WATER: 0, SAND: 1, GRASS: 2, TREE: 3, ROCK: 4,
   ROAD: 5, WALL: 6, LAVA: 7, DIRT: 8, GRAVE: 9, FOUNTAIN: 10, FLOOR: 11,
+  STAIR_DOWN: 12, STAIR_UP: 13, VOID: 14, // Ebenen-System: Treppen + Leere
 };
 
-const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR]);
+const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR, TILE.STAIR_DOWN, TILE.STAIR_UP]);
+
+// Ebenen der Welt: z = -3..+2 (3 Untergeschosse, Oberwelt, 2 Obergeschosse)
+const FLOOR_MIN = -3, FLOOR_MAX = 2;
+const FLOOR_NAMES = { '-3': '3. UG', '-2': '2. UG', '-1': '1. UG', 0: 'Oberwelt', 1: '1. OG', 2: '2. OG' };
 
 // tame: zähmbar • flee: flieht bei wenig Leben • kite: hält Abstand (Fernkampf)
 // pack: alarmiert Artgenossen in der Nähe • boss: Boss (Spezial-Spawnsystem)
@@ -366,12 +371,25 @@ const QUESTS = {
   q_lich:     { name: 'Der Totenbeschwörer',   npc: 'npc_sera',  lvl: 38, target: 'lich',      count: 2,  reward: { gold: 6500, xp: 12000 }, prereq: 'q_vampire', desc: 'Ein Lich beherrscht die Untoten der Krypta. Zerstöre den Meister, und die Toten ruhen.' },
   q_demon:    { name: 'Herz des Vulkans',      npc: 'npc_koenig',lvl: 40, target: 'demon',     count: 3,  reward: { gold: 9000, xp: 16000 }, prereq: 'q_dragon', desc: 'Aus dem Vulkan kriechen Dämonen. Beende den Albtraum – für Kiria!' },
 
+  // ---- DUNGEON-QUESTS: führen in die Unterwelt (1.–3. UG) und auf die Gipfel (OG) ----
+  q_mine:     { name: 'Die Alte Mine',         npc: 'npc_bruno', lvl: 5,  target: 'kobold',    count: 12, reward: { gold: 240,  xp: 240, item: 'torch' },  desc: 'Südöstlich von Kiria führt ein Loch in die Alte Mine hinab. Kobolde hausen darin – nimm eine Fackel mit, unten ist es finster!' },
+  q_crypt:    { name: 'Hinab in die Krypta',   npc: 'npc_alrik', lvl: 9,  target: 'skeleton',  count: 12, reward: { gold: 450,  xp: 500 },                 desc: 'Unter dem alten Friedhof liegt eine Krypta voller Skelette. Steig hinab und verschaffe den Toten Ruhe!' },
+  q_spiderdepth: { name: 'Seide aus der Tiefe', npc: 'npc_eira', lvl: 16, target: 'giant_spider', count: 6, reward: { gold: 800, xp: 1250, item: 'spider_silk' }, prereq: 'q_spiders', desc: 'Unter dem Spinnenwald liegt die Spinnentiefe (1. UG). Dort spinnen Riesenspinnen die feinste Seide. Hol sie dir!' },
+  q_orcmine:  { name: 'Die Kriegsmine',        npc: 'npc_bruno', lvl: 18, target: 'orc_berserker', count: 8, reward: { gold: 950, xp: 1500 }, prereq: 'q_orcs', desc: 'Die Orks graben unter ihrer Festung nach Eisen für den Krieg. Steig in die Kriegsmine hinab und stopp sie!' },
+  q_katakomben: { name: 'Ruf der Katakomben',  npc: 'npc_sera',  lvl: 24, target: 'mummy',     count: 10, reward: { gold: 1400, xp: 2400 }, prereq: 'q_mummies', desc: 'Unter den Ruinen erstrecken sich die Katakomben (1. UG). Die Mumien dort unten kennen keinen Schlaf – noch nicht.' },
+  q_icedepth: { name: 'Das ewige Eis',         npc: 'npc_odo',   lvl: 27, target: 'ice_golem', count: 6,  reward: { gold: 1800, xp: 3200 },                desc: 'In der Eishöhle unter den Yeti-Bergen wachsen Golems aus ewigem Eis. Zerschlage sie!' },
+  q_peaks:    { name: 'Über den Wolken',       npc: 'npc_ida',   lvl: 30, target: 'griffin',   count: 6,  reward: { gold: 2600, xp: 4800 },                desc: 'Über den Bergen bei Steinfels liegt der Adlerfels (1. OG). Greife hinauf zu den Greifen – wenn du schwindelfrei bist!' },
+  q_deepdark: { name: 'Ritter der Finsternis', npc: 'npc_sera',  lvl: 33, target: 'dark_knight', count: 6, reward: { gold: 3400, xp: 6200, item: 'plate' }, prereq: 'q_katakomben', desc: 'In der Tiefengruft (2. UG unter den Ruinen) sammeln sich die dunklen Ritter. Steig hinab und zerschlage ihren Orden!' },
+  q_firecore: { name: 'Glut der Tiefe',        npc: 'npc_grom',  lvl: 36, target: 'fire_elemental', count: 8, reward: { gold: 4400, xp: 8200 },            desc: 'Unter dem Vulkan brodeln die Feuerkammern (2. UG). Die Glut dort unten frisst sich zur Oberfläche – lösch sie!' },
+  q_demonhall: { name: 'Die Dämonenhallen',    npc: 'npc_koenig',lvl: 42, target: 'demon',     count: 4,  reward: { gold: 11000, xp: 20000 }, prereq: 'q_demon', desc: 'Im 3. UG unter dem Vulkan liegen die Dämonenhallen – das Herz der Finsternis. Nur die Größten steigen so tief hinab. Für Kiria!' },
+  q_dragonpeak: { name: 'Am Drachengipfel',    npc: 'npc_koenig',lvl: 45, target: 'frost_dragon', count: 3, reward: { gold: 14000, xp: 26000, item: 'dragon_boots' }, prereq: 'q_dragon', desc: 'Auf dem Drachengipfel (2. OG über dem Adlerfels) kreisen Frostdrachen. Erklimm beide Aufstiege und jage sie über den Wolken!' },
+
   // ---- BOSS-QUESTS: schalten die Boss-Höhle frei (Boss erscheint nur mit aktiver Quest) ----
-  bq_spider: { name: '👑 Die Spinnenkönigin', bossQuest: true, npc: 'npc_eira',   lvl: 15, target: 'boss_spider_queen', count: 1, reward: { gold: 3000,  xp: 4000, item: 'saddle_spider' }, desc: 'Tief in der Spinnenhöhle westlich von Eichwald thront die Spinnenkönigin mit ihren Wächtern. Nimm diese Quest an, dann erscheint sie – besiege sie!' },
-  bq_orc:    { name: '👑 Der Ork-Kriegsherr', bossQuest: true, npc: 'npc_bruno',  lvl: 20, target: 'boss_orc_warlord',  count: 1, reward: { gold: 4500,  xp: 6000 }, prereq: 'q_orcs', desc: 'In der Kriegshöhle unter der Ork-Festung schmiedet der Kriegsherr seine Pläne. Nur mit dieser Quest wagen sich seine Berserker hervor. Beende seinen Feldzug!' },
-  bq_yeti:   { name: '👑 Der Yeti-König', bossQuest: true, npc: 'npc_odo',    lvl: 26, target: 'boss_yeti_king',    count: 1, reward: { gold: 6000,  xp: 8500 }, desc: 'In der Eishöhle im hohen Norden herrscht der Yeti-König mit seiner Leibgarde. Stelle dich der Kälte – wenn du dich traust!' },
-  bq_lich:   { name: '👑 Der Lichkönig', bossQuest: true, npc: 'npc_sera',   lvl: 34, target: 'boss_lich_king',    count: 1, reward: { gold: 9000,  xp: 13000 }, prereq: 'q_lich', desc: 'In der Gruft tief in den Ruinen erhebt sich der Lichkönig, bewacht von dunklen Rittern. Zerschlage seine Herrschaft über die Toten!' },
-  bq_dragon: { name: '👑 Der Drachenfürst', bossQuest: true, npc: 'npc_koenig', lvl: 40, target: 'boss_dragon_lord',  count: 1, reward: { gold: 14000, xp: 20000, item: 'saddle_dragon' }, prereq: 'q_dragon', desc: 'Im Drachenhort im Nordosten thront der Drachenfürst mit seiner Brut. Nur die größten Helden kehren zurück – mit einem Drachen als Reittier!' },
+  bq_spider: { name: '👑 Die Spinnenkönigin', bossQuest: true, npc: 'npc_eira',   lvl: 15, target: 'boss_spider_queen', count: 1, reward: { gold: 3000,  xp: 4000, item: 'saddle_spider' }, desc: 'Im tiefsten Winkel der Spinnentiefe (1. UG unter dem Spinnenwald) thront die Spinnenkönigin mit ihren Wächtern. Nimm diese Quest an, steig hinab – dann erscheint sie!' },
+  bq_orc:    { name: '👑 Der Ork-Kriegsherr', bossQuest: true, npc: 'npc_bruno',  lvl: 20, target: 'boss_orc_warlord',  count: 1, reward: { gold: 4500,  xp: 6000 }, prereq: 'q_orcs', desc: 'In der Kriegsmine (1. UG unter der Ork-Festung) schmiedet der Kriegsherr seine Pläne. Nur mit dieser Quest wagen sich seine Berserker hervor. Beende seinen Feldzug!' },
+  bq_yeti:   { name: '👑 Der Yeti-König', bossQuest: true, npc: 'npc_odo',    lvl: 26, target: 'boss_yeti_king',    count: 1, reward: { gold: 6000,  xp: 8500 }, desc: 'In der Eisgrotte (2. UG unter den Yeti-Bergen) herrscht der Yeti-König mit seiner Leibgarde. Steig durch die Eishöhle hinab – wenn du dich traust!' },
+  bq_lich:   { name: '👑 Der Lichkönig', bossQuest: true, npc: 'npc_sera',   lvl: 34, target: 'boss_lich_king',    count: 1, reward: { gold: 9000,  xp: 13000 }, prereq: 'q_lich', desc: 'In der Tiefengruft (2. UG unter den Ruinen) erhebt sich der Lichkönig, bewacht von dunklen Rittern. Zerschlage seine Herrschaft über die Toten!' },
+  bq_dragon: { name: '👑 Der Drachenfürst', bossQuest: true, npc: 'npc_koenig', lvl: 40, target: 'boss_dragon_lord',  count: 1, reward: { gold: 14000, xp: 20000, item: 'saddle_dragon' }, prereq: 'q_dragon', desc: 'Im Urdrachen-Schlund (3. UG, tief unter dem Drachenhort) thront der Drachenfürst mit seiner Brut. Nur die größten Helden kehren aus der Tiefe zurück – mit einem Drachen als Reittier!' },
 };
 
 const MOUNT_SPEED = 0.6;
@@ -420,7 +438,7 @@ const OUTFITS = [
 ];
 
 module.exports = {
-  TILE, WALKABLE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS,
+  TILE, WALKABLE, FLOOR_MIN, FLOOR_MAX, FLOOR_NAMES, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS,
   SHOP_ITEMS, QUESTS, MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
   skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 };

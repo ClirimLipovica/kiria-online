@@ -17,7 +17,9 @@ let skullExpiry = 0;
 const TILE_MINI_COLORS = [
   '#1c4f7d', '#d8c07a', '#4d9040', '#2f6e2a', '#8d8d92',
   '#a39a83', '#6b5b4a', '#ff5a10', '#7d5f3a', '#6f5a40', '#9aa8b8', '#a8814e',
+  '#ffe08a', '#ffe08a', '#0a0a0e', // Treppe runter/rauf (gold) + Leere
 ];
+const FLOOR_LABELS = { '-3': '3. UG', '-2': '2. UG', '-1': '1. UG', 0: '', 1: '1. OG', 2: '2. OG' };
 
 const SPELL_ICONS = {
   exura: '💚', exura_gran: '💖', utani_hur: '💨', utevo_lux: '🔆',
@@ -848,8 +850,9 @@ export function toggleBigMap(selfEntity, forceClose = false, entities = null) {
     ctx.fillText(t.name, t.cx * bigMapScale, t.cy * bigMapScale - 6);
   }
   // Nur der Weltboss (Uralter Titan) wird auf der Karte gezeigt – die
-  // anderen Bosse muss man selbst finden (in ihren Höhlen).
-  if (entities) {
+  // anderen Bosse muss man selbst finden (in ihren Höhlen). Der Titan
+  // erscheint nur auf der Oberwelt-Karte.
+  if (entities && miniWorld.z === 0) {
     ctx.font = '18px serif';
     for (const e of entities.values()) {
       if (!e.worldBoss || e.dead) continue;
@@ -882,23 +885,44 @@ export function toggleBigMap(selfEntity, forceClose = false, entities = null) {
 
 export function initMinimap(world) {
   miniWorld = world;
-  miniBase = document.createElement('canvas');
-  miniBase.width = world.size;
-  miniBase.height = world.size;
+  rebuildMinimap(world);
+}
+
+// Minimap-Grundbild für die AKTUELLE Ebene zeichnen (bei Ebenenwechsel neu)
+export function rebuildMinimap(world) {
+  miniWorld = world;
+  if (!miniBase) {
+    miniBase = document.createElement('canvas');
+    miniBase.width = world.size;
+    miniBase.height = world.size;
+  }
   const ctx = miniBase.getContext('2d');
-  // Schnell per ImageData (1,3 Mio. Kacheln)
   const rgb = TILE_MINI_COLORS.map((c) => [
     parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16),
   ]);
+  // Unter Tage: Fels dunkel, Böden gedämpft – Höhlen-Look auf der Karte
+  const underground = world.z < 0;
   const img = ctx.createImageData(world.size, world.size);
   for (let i = 0; i < world.tiles.length; i++) {
-    const col = rgb[world.tiles[i]] || [0, 0, 0];
+    const t = world.tiles[i];
+    let col = rgb[t] || [10, 10, 14];
+    if (underground) {
+      if (t === 4) col = [30, 30, 38];          // Fels = fast schwarz
+      else if (t !== 12 && t !== 13) col = [col[0] * 0.55, col[1] * 0.55, col[2] * 0.55];
+    }
     img.data[i * 4] = col[0];
     img.data[i * 4 + 1] = col[1];
     img.data[i * 4 + 2] = col[2];
     img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
+  // Ebenen-Anzeige neben der Minimap
+  const fl = $('floorTxt');
+  if (fl) {
+    const label = FLOOR_LABELS[world.z] || '';
+    fl.style.display = label ? 'block' : 'none';
+    fl.textContent = label ? `🪜 Ebene: ${label}` : '';
+  }
 }
 
 export function updateMinimap(entities, selfId) {
@@ -914,8 +938,9 @@ export function updateMinimap(entities, selfId) {
   ctx.drawImage(miniBase, sx, sy, view, view, 0, 0, cv.width, cv.height);
   const scale = cv.width / view;
   miniView = { sx, sy, scale };
+  const myZ = (self.z || 0);
   for (const e of entities.values()) {
-    if (e.dead) continue;
+    if (e.dead || (e.z || 0) !== myZ) continue; // nur die eigene Ebene zeigen
     const px = (e.tx - sx) * scale, py = (e.ty - sy) * scale;
     if (px < 0 || py < 0 || px > cv.width || py > cv.height) continue;
     if (e.worldBoss) {

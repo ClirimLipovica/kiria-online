@@ -97,6 +97,19 @@ socket.on('disconnect', () => {
 });
 
 // ================= SPIELSTART =================
+// RLE-Dekodierung der Ebenen-Karten: [Wert, LaufLo, LaufHi]-Tripel
+function decodeRLE(buf, size) {
+  const src = new Uint8Array(buf);
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (let i = 0; i + 2 < src.length; i += 3) {
+    const v = src[i], run = src[i + 1] | (src[i + 2] << 8);
+    out.fill(v, o, o + run);
+    o += run;
+  }
+  return out;
+}
+
 socket.on('welcome', (data) => {
   selfId = data.id;
   defs = data.defs;
@@ -106,7 +119,14 @@ socket.on('welcome', (data) => {
 
   initThree();
   setOutfitDefs(defs.OUTFITS || []); // Outfit-Definitionen für das Rendering
+  // 6 Ebenen entpacken (RLE → Uint8Array)
+  const S2 = data.world.size * data.world.size;
+  data.world.floors = data.world.floorsRLE.map((f) => ({
+    tiles: decodeRLE(f.t, S2),
+    heights: decodeRLE(f.h, S2),
+  }));
   world = new World3D(scene, data.world);
+  if (you.z) world.setFloor(you.z);
   // Beim Start alle umliegenden Chunks sofort bauen (danach 1/Frame)
   for (let i = 0; i < 60; i++) { if (!world.ensureChunks(you.x, you.y)) break; }
   fx.initEffects(scene);
@@ -232,8 +252,10 @@ function removeEntity(id) {
 }
 
 function entityBlockedAt(x, y, ignoreId) {
+  const myZ = (you && you.z) || 0;
   for (const e of entities.values()) {
     if (e.id === ignoreId || e.dead || e.kind === 'npc' || e.kind === 'pet' || e.kind === 'corpse') continue;
+    if ((e.z || 0) !== myZ) continue; // Wesen auf anderen Ebenen blockieren nicht
     if (e.tx === x && e.ty === y) return true;
   }
   return false;
@@ -241,12 +263,14 @@ function entityBlockedAt(x, y, ignoreId) {
 
 const self = () => entities.get(selfId);
 
-// Nur Figuren in Sichtweite rendern (wichtig bei 500+ Monstern)
+// Nur Figuren in Sichtweite UND auf der eigenen Ebene rendern
 function updateVisibility() {
   const me = self();
   if (!me) return;
+  const myZ = (you && you.z) || 0;
   for (const e of entities.values()) {
     if (e.id === selfId) { e.group.visible = true; continue; }
+    if ((e.z || 0) !== myZ) { e.group.visible = false; continue; }
     const d = Math.max(Math.abs(e.tx - me.tx), Math.abs(e.ty - me.ty));
     e.group.visible = !e.dead && d <= VIEW_RADIUS;
   }
@@ -405,6 +429,22 @@ function handleEvent(ev) {
     case 'pos': {
       if (e) e.snapTo(ev.x, ev.y);
       if (ev.id === selfId) pathQueue = [];
+      break;
+    }
+    case 'floor': {
+      // Jemand wechselt die Ebene (Treppe rauf/runter)
+      if (e) { e.z = ev.z; e.snapTo(ev.x, ev.y); }
+      if (ev.id === selfId) {
+        if (you) you.z = ev.z;
+        world.setFloor(ev.z);
+        // Kamera & Karte sofort auf die neue Ebene ziehen
+        for (let i = 0; i < 80; i++) { if (!world.ensureChunks(ev.x, ev.y)) break; }
+        ui.rebuildMinimap(world);
+        pathQueue = [];
+        clearTarget();
+        fx.sfx.level();
+      }
+      updateVisibility();
       break;
     }
     case 'fx': {

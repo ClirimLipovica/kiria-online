@@ -14,6 +14,30 @@ const { ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, MONSTERS, SHOP_ITEMS, QU
 
 // Nur die Namen der Monster an den Client geben (für Stall, Mounts usw.)
 const MONSTER_NAMES = Object.fromEntries(Object.entries(MONSTERS).map(([k, v]) => [k, v.name]));
+
+// RLE-Kompression für die Ebenen-Karten: [Wert, LaufLo, LaufHi]-Tripel.
+// Die UG-Ebenen sind fast nur Fels, die OG-Ebenen fast nur Leere –
+// so schrumpfen 16 MB Kartendaten auf wenige hundert KB.
+function encodeRLE(u8) {
+  const out = [];
+  let i = 0;
+  while (i < u8.length) {
+    const v = u8[i];
+    let run = 1;
+    while (i + run < u8.length && u8[i + run] === v && run < 65535) run++;
+    out.push(v, run & 0xff, (run >> 8) & 0xff);
+    i += run;
+  }
+  return Buffer.from(out);
+}
+// Ebenen einmalig kodieren (Welt ist statisch)
+let floorsRLE = null;
+function getFloorsRLE() {
+  if (!floorsRLE) {
+    floorsRLE = game.world.floors.map((f) => ({ t: encodeRLE(f.tiles), h: encodeRLE(f.heights) }));
+  }
+  return floorsRLE;
+}
 const game = require('./game');
 const storage = require('./storage');
 
@@ -84,8 +108,7 @@ io.on('connection', (socket) => {
         id: player.id,
         world: {
           size: w.size,
-          tiles: Buffer.from(w.tiles),     // binär – spart Bandbreite
-          heights: Buffer.from(w.heights),
+          floorsRLE: getFloorsRLE(),       // 6 Ebenen, RLE-komprimiert
           buildings: w.buildings,
           npcs: w.npcs,
           towns: w.towns,

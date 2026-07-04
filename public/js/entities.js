@@ -760,6 +760,7 @@ export class Entity {
     this.id = data.id;
     this.kind = kind; // 'player' | 'monster' | 'npc' | 'pet' | 'corpse'
     this.vocation = data.vocation || 'knight';
+    this.z = data.z || 0; // Ebene (-3..+2), 0 = Oberwelt
     this.name = data.name;
     this.type = data.type || null;
     this.level = data.level || null;

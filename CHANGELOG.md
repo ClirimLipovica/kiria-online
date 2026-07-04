@@ -4,6 +4,46 @@ Alle wichtigen Änderungen am Spiel, von der ersten 3D-Version bis heute.
 
 ---
 
+## Version 11.0.0 – „Die Unterwelt" *(4. Juli 2026)*
+
+Kiria hat jetzt **6 Stockwerke**: 3 Untergeschosse voller Höhlen, die
+Oberwelt und 2 Obergeschosse mit Berg-Plateaus über den Wolken.
+
+### Mehrstöckige Welt
+- **13 Höhlensysteme** aus vielen kleinen Kavernen mit Verbindungstunneln –
+  keine einzelne Riesenhöhle, sondern verwinkelte Gänge
+- **33 Treppen/Löcher** verbinden die Ebenen; die meisten Systeme haben
+  **mehrere Eingänge** (die Alte Mine bei Kiria sogar drei)
+- 1. UG: Alte Mine, Friedhofs-Krypta, Spinnentiefe, Kriegsmine, Eishöhle,
+  Katakomben, Vulkanschlund, Drachengrotte
+- 2. UG: Eisgrotte, Tiefengruft, Feuerkammern, Drachenhort-Tiefen
+- 3. UG: Dämonenhallen und Urdrachen-Schlund (Endgame!)
+- 1. OG: Yeti-Hochplateau, Vulkankrater-Rand, Adlerfels
+- 2. OG: Drachengipfel und Sturmgipfel
+- Unter Tage ist es **dauerhaft düster** – Fackel und Utevo Lux leuchten
+  dort immer; die Minimap zeigt die Höhlen samt Ebenen-Anzeige (z. B. „1. UG")
+
+### Monster überall – nicht nur oberirdisch
+- **~2700 Monster**, davon über 400 unter der Erde und auf den Gipfeln
+- **Dämonen an 4 Orten** (Vulkan, Feuerkammern, Dämonenhallen, Kraterrand),
+  **Drachenbrut in 14 Zonen** über alle Ebenen verteilt
+- Die 5 Bosse sitzen jetzt TIEF in der Unterwelt: Spinnenkönigin und
+  Ork-Kriegsherr im 1. UG, Yeti-König und Lichkönig im 2. UG, der
+  Drachenfürst im 3. UG – weiterhin nur mit aktiver Boss-Quest erreichbar
+
+### Quests
+- **11 neue Dungeon-Quests** (jetzt 44): von „Die Alte Mine" (Level 5)
+  über „Ruf der Katakomben" bis „Die Dämonenhallen" und „Am Drachengipfel"
+
+### Technik
+- Ebenen werden komprimiert übertragen (aus 16 MB Kartendaten werden ~800 KB)
+- Kampf, Zauber, Beute, Tiere und Karte sind komplett ebenen-getrennt;
+  Tiere folgen ihrem Besitzer durch Treppen
+- Einmaliger Positions-Reset: alle Helden starten wieder am Tempel
+  (Level, Gold, Ausrüstung und Tiere bleiben natürlich erhalten)
+
+---
+
 ## Version 8.0.0 – „Die Challenge" *(2. Juli 2026)*
 
 Die große Balance-Überarbeitung: Kiria ist jetzt ein forderndes Spiel.

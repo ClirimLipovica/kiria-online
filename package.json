@@ -1,6 +1,6 @@
 {
   "name": "kiria-online",
-  "version": "10.2.0",
+  "version": "11.0.0",
   "description": "Kiria Online 3D - Ein Tibia-inspiriertes 3D-MMORPG (Node.js + three.js)",
   "main": "server/server.js",
   "scripts": {

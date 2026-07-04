@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------
 const storage = require('./storage');
 const {
-  MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, SHOP_ITEMS, QUESTS,
+  TILE, MONSTERS, ITEMS, EQUIP_SLOTS, SPELLS, VOCATIONS, OUTFITS, SHOP_ITEMS, QUESTS,
   MOUNT_SPEED, HASTE_SPEED, FOOD_MAX, SKULL_MS, xpForLevel, petXpForLevel,
   skillNext, SKILL_CAP, tameMlRequired, tameStartLevel,
 } = require('./constants');
@@ -29,7 +29,7 @@ const { generateWorld, isWalkable } = require('./world');
 
 const TICK_MS = 150;
 const BASE_ATK_MS = 2000;
-const MAP_VERSION = 5;
+const MAP_VERSION = 6; // v11: mehrstöckige Welt (Positionen werden einmalig zurückgesetzt)
 const CORPSE_TTL = 90000;
 const STABLE_MAX = 6;
 
@@ -50,26 +50,31 @@ let dirtyHp = new Map();
 let events = [];
 let dirtyPrivate = new Set();
 
-const key = (x, y) => x + ',' + y;
+// Positionen leben auf Ebenen (z = -3..+2). key/cheb sind ebenen-bewusst:
+// cheb über verschiedene Ebenen = Unendlich, damit sind ALLE Reichweiten-
+// Checks (Angriff, Zauber, Beute, NPC, Aggro) automatisch ebenen-sicher.
+const key = (x, y, z) => (z || 0) + '|' + x + ',' + y;
 const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+const cheb = (a, b) => ((a.z || 0) !== (b.z || 0)) ? Infinity : Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
-function isFree(x, y, ignoreId) {
-  if (!isWalkable(world, x, y)) return false;
-  const o = occ.get(key(x, y));
+function isFree(x, y, z, ignoreId) {
+  if (!isWalkable(world, x, y, z)) return false;
+  const o = occ.get(key(x, y, z));
   return !o || o === ignoreId;
 }
 
-function inTown(x, y) {
+// Städte existieren nur auf der Oberwelt (z=0)
+function inTown(x, y, z = 0) {
+  if (z !== 0) return false;
   for (const t of world.towns) {
     if (Math.abs(x - t.cx) <= t.r && Math.abs(y - t.cy) <= t.r) return true;
   }
   return false;
 }
 
-function monsterCanStep(x, y) {
-  return isFree(x, y) && !inTown(x, y);
+function monsterCanStep(x, y, z) {
+  return isFree(x, y, z) && !inTown(x, y, z);
 }
 
 function nearestTemple(x, y) {
@@ -81,44 +86,78 @@ function nearestTemple(x, y) {
   return best.temple;
 }
 
+function tileAt(x, y, z) {
+  if (x < 0 || y < 0 || x >= world.size || y >= world.size) return -1;
+  return world.floors[(z || 0) + 3].tiles[y * world.size + x];
+}
+
 function place(ent, x, y) {
-  occ.delete(key(ent.x, ent.y));
+  occ.delete(key(ent.x, ent.y, ent.z));
   ent.x = x; ent.y = y;
-  occ.set(key(x, y), ent.id);
+  occ.set(key(x, y, ent.z), ent.id);
   dirtyMoves.set(ent.id, [x, y]);
 }
 
-function placePet(pet, x, y) {
+function placePet(pet, x, y, z) {
+  if (z !== undefined && z !== pet.z) {
+    pet.z = z;
+    events.push({ t: 'floor', id: pet.id, z, x, y });
+  }
   pet.x = x; pet.y = y;
   dirtyMoves.set(pet.id, [x, y]);
 }
 
 function removeFromMap(ent) {
-  if (occ.get(key(ent.x, ent.y)) === ent.id) occ.delete(key(ent.x, ent.y));
+  if (occ.get(key(ent.x, ent.y, ent.z)) === ent.id) occ.delete(key(ent.x, ent.y, ent.z));
 }
 
-function findFreeNear(cx, cy, rMax, rMin = 0, avoidTown = false) {
+function findFreeNear(cx, cy, rMax, rMin = 0, avoidTown = false, z = 0) {
   for (let tries = 0; tries < 60; tries++) {
     const a = Math.random() * Math.PI * 2;
     const r = rMin + Math.random() * (rMax - rMin);
     const x = Math.round(cx + Math.cos(a) * r);
     const y = Math.round(cy + Math.sin(a) * r);
-    if (!isFree(x, y)) continue;
-    if (!world.reachable[y * world.size + x]) continue;
-    if (avoidTown && inTown(x, y)) continue;
+    if (!isFree(x, y, z)) continue;
+    if (!world.reachable[z + 3][y * world.size + x]) continue;
+    if (avoidTown && inTown(x, y, z)) continue;
     return { x, y };
   }
   return null;
 }
 
+// Ebenenwechsel (Treppe betreten): daneben auf der Zielebene landen
+function changeFloor(p, nz) {
+  if (nz < -3 || nz > 2) return;
+  let land = null;
+  for (const [dx, dy] of DIRS8) {
+    const x = p.x + dx, y = p.y + dy;
+    const t = tileAt(x, y, nz);
+    if (t !== TILE.STAIR_DOWN && t !== TILE.STAIR_UP && isFree(x, y, nz, p.id)) { land = { x, y }; break; }
+  }
+  if (!land) land = { x: p.x, y: p.y };
+  occ.delete(key(p.x, p.y, p.z));
+  p.z = nz; p.x = land.x; p.y = land.y;
+  occ.set(key(p.x, p.y, p.z), p.id);
+  p.targetId = null;
+  // kurze Sperre, damit man nicht mit gehaltener Taste sofort wieder
+  // auf die Gegentreppe läuft
+  p.nextMoveAt = Date.now() + 500;
+  events.push({ t: 'floor', id: p.id, z: nz, x: p.x, y: p.y });
+  info(p, nz < 0 ? `⬇ Du steigst hinab... (${['', '1. UG', '2. UG', '3. UG'][-nz]})` : nz > 0 ? `⬆ Du steigst hinauf! (${nz}. OG)` : '🌍 Zurück an der Oberfläche.');
+  dirtyPrivate.add(p.id);
+  // Tiere folgen ihrem Besitzer durch die Ebenen
+  for (const pet of p.pets) { pet.targetId = null; placePet(pet, p.x, p.y, nz); }
+}
+
 // ---------------- Monster ----------------
 function spawnMonster(type, home, silent = false) {
   const def = MONSTERS[type];
-  const pos = findFreeNear(home.x, home.y, home.r, home.rMin || 0, true);
+  const hz = home.z || 0;
+  const pos = findFreeNear(home.x, home.y, home.r, home.rMin || 0, true, hz);
   if (!pos) return null;
   const m = {
     id: 'm' + (nextMonsterId++),
-    type, x: pos.x, y: pos.y,
+    type, x: pos.x, y: pos.y, z: hz,
     hp: def.hp, maxHp: def.hp,
     home, targetId: null,
     // Shiny: 4% Chance auf eine seltene Farbvariante (nicht bei Bossen)
@@ -130,7 +169,7 @@ function spawnMonster(type, home, silent = false) {
     blockedSince: 0, lastCombatAt: 0, retargetAt: 0,
   };
   monsters.set(m.id, m);
-  occ.set(key(m.x, m.y), m.id);
+  occ.set(key(m.x, m.y, m.z), m.id);
   if (!silent) events.push({ t: 'spawn', monster: publicMonster(m) });
   return m;
 }
@@ -138,7 +177,7 @@ function spawnMonster(type, home, silent = false) {
 function initMonsters() {
   for (const s of world.spawns) {
     for (let i = 0; i < s.count; i++) {
-      spawnMonster(s.type, { x: s.cx, y: s.cy, r: s.rMax, rMin: s.rMin }, true);
+      spawnMonster(s.type, { x: s.cx, y: s.cy, r: s.rMax, rMin: s.rMin, z: s.z || 0 }, true);
     }
   }
 }
@@ -146,7 +185,7 @@ function initMonsters() {
 function publicMonster(m) {
   const def = MONSTERS[m.type];
   return {
-    id: m.id, type: m.type, name: (m.shiny ? '✨ ' : '') + def.name, x: m.x, y: m.y, hp: m.hp, maxHp: m.maxHp,
+    id: m.id, type: m.type, name: (m.shiny ? '✨ ' : '') + def.name, x: m.x, y: m.y, z: m.z || 0, hp: m.hp, maxHp: m.maxHp,
     mv: def.moveMs, boss: def.boss ? true : undefined,
     worldBoss: def.worldBoss ? true : undefined,
     shiny: m.shiny ? true : undefined,
@@ -167,13 +206,13 @@ const SHINY_CHANCE = 0.04;    // 4% Chance auf ein glänzendes (andersfarbiges) 
 
 function createPet(owner, type, level = 1, xp = 0, silent = false, opts = {}) {
   const stats = petStats(type, level);
-  const pos = findFreeNear(owner.x, owner.y, 3) || { x: owner.x, y: owner.y };
+  const pos = findFreeNear(owner.x, owner.y, 3, 0, false, owner.z || 0) || { x: owner.x, y: owner.y };
   const pet = {
     id: 'p' + (nextPetId++),
     type, level, xp,
     name: opts.name || MONSTERS[type].name,
     shiny: !!opts.shiny,
-    x: pos.x, y: pos.y,
+    x: pos.x, y: pos.y, z: owner.z || 0,
     hp: stats.maxHp, maxHp: stats.maxHp,
     ownerId: owner.id, ownerName: owner.name,
     targetId: null, retargetAt: 0,
@@ -189,7 +228,7 @@ function createPet(owner, type, level = 1, xp = 0, silent = false, opts = {}) {
 function publicPet(p) {
   return {
     id: p.id, type: p.type, name: p.name, level: p.level, shiny: p.shiny,
-    x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp,
+    x: p.x, y: p.y, z: p.z || 0, hp: p.hp, maxHp: p.maxHp,
     ownerId: p.ownerId, ownerName: p.ownerName,
   };
 }
@@ -296,7 +335,7 @@ function renamePet(p, ref, name) {
 function publicPlayer(p) {
   return {
     id: p.id, name: p.name, vocation: p.vocation, outfit: p.outfit,
-    x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, level: p.level, dead: p.dead,
+    x: p.x, y: p.y, z: p.z || 0, hp: p.hp, maxHp: p.maxHp, level: p.level, dead: p.dead,
     mounted: p.mounted, skull: p.skullUntil > Date.now(),
   };
 }
@@ -371,6 +410,7 @@ function createPlayer(socket, account) {
     outfit: normalizeOutfit(account.outfit),
     x: save && save.x !== undefined ? save.x : spawn.x,
     y: save && save.y !== undefined ? save.y : spawn.y,
+    z: save && save.x !== undefined && save.z !== undefined ? save.z : 0,
     level: save ? save.level : 1,
     xp: save ? save.xp : 0,
     gold: save ? save.gold : 50,
@@ -397,14 +437,15 @@ function createPlayer(socket, account) {
   p.hp = save && save.hp ? Math.min(save.hp, p.maxHp) : p.maxHp;
   p.mp = save && save.mp ? Math.min(save.mp, p.maxMp) : p.maxMp;
   recalcSpeed(p);
-  if (!isFree(p.x, p.y)) {
-    const alt = findFreeNear(p.x, p.y, 6) || spawn;
-    p.x = alt.x; p.y = alt.y;
+  if (!isFree(p.x, p.y, p.z)) {
+    const alt = findFreeNear(p.x, p.y, 6, 0, false, p.z);
+    if (alt) { p.x = alt.x; p.y = alt.y; }
+    else { p.x = spawn.x; p.y = spawn.y; p.z = 0; }
   }
   // Freigeschaltete Outfits: mindestens die Standard-Farben (Index 0–11)
   if (!Array.isArray(p.outfits)) p.outfits = [];
   players.set(p.id, p);
-  occ.set(key(p.x, p.y), p.id);
+  occ.set(key(p.x, p.y, p.z), p.id);
   // Gespeicherte Tiere wiederbeleben (neues Array-Format + altes Einzel-Format)
   if (account.vocation === 'tamer' && save) {
     const list = Array.isArray(save.pets) ? save.pets : (save.pet ? [save.pet] : []);
@@ -418,7 +459,7 @@ function createPlayer(socket, account) {
 function saveData(p) {
   return {
     mapV: MAP_VERSION,
-    x: p.x, y: p.y, level: p.level, xp: p.xp, gold: p.gold, food: p.food,
+    x: p.x, y: p.y, z: p.z || 0, level: p.level, xp: p.xp, gold: p.gold, food: p.food,
     hp: p.hp, mp: p.mp, inv: p.inv, eq: p.eq, quests: p.quests,
     mounts: p.mounts, petStable: p.petStable, skills: p.skills, outfits: p.outfits,
     pets: p.pets.map((pet) => ({ type: pet.type, level: pet.level, xp: pet.xp, name: pet.name, shiny: pet.shiny })),
@@ -523,11 +564,18 @@ function respawnPlayer(p) {
   p.dead = false;
   p.hp = p.maxHp;
   p.mp = p.maxMp;
+  // Tempel liegen immer auf der Oberwelt
+  if (p.z !== 0) {
+    occ.delete(key(p.x, p.y, p.z));
+    p.z = 0;
+    occ.set(key(p.x, p.y, p.z), p.id);
+    events.push({ t: 'floor', id: p.id, z: 0, x: spawn.x, y: spawn.y });
+  }
   place(p, spawn.x, spawn.y);
   dirtyHp.set(p.id, [p.hp, p.maxHp]);
   dirtyPrivate.add(p.id);
   events.push({ t: 'respawn', id: p.id });
-  for (const pet of p.pets) placePet(pet, spawn.x, spawn.y);
+  for (const pet of p.pets) placePet(pet, spawn.x, spawn.y, 0);
 }
 
 function damageMonster(m, dmg, attacker, kind, aggroId) {
@@ -570,7 +618,7 @@ function killMonster(m, killer) {
   if (gold > 0 || items.length) {
     const corpse = {
       id: 'c' + (nextCorpseId++),
-      name: def.name, x: m.x, y: m.y, gold, items,
+      name: def.name, x: m.x, y: m.y, z: m.z || 0, gold, items,
       expires: Date.now() + CORPSE_TTL,
     };
     corpses.set(corpse.id, corpse);
@@ -603,7 +651,7 @@ function killMonster(m, killer) {
 }
 
 function publicCorpse(c) {
-  return { id: c.id, name: c.name, x: c.x, y: c.y };
+  return { id: c.id, name: c.name, x: c.x, y: c.y, z: c.z || 0 };
 }
 
 function lootCorpse(p, corpseId) {
@@ -712,16 +760,17 @@ function updateBosses(now) {
     if (b.monsterId && monsters.has(b.monsterId)) continue; // Boss lebt
     if (b.monsterId) { b.monsterId = null; despawnBossGuards(b); }
     if (now < b.nextAt) continue;
-    // Ist ein Spieler mit AKTIVER Boss-Quest nah genug an der Höhle?
+    // Ist ein Spieler mit AKTIVER Boss-Quest auf der Boss-Ebene nah genug?
+    const bz = b.z || 0;
     let trigger = null;
     for (const p of players.values()) {
-      if (p.dead) continue;
+      if (p.dead || p.z !== bz) continue;
       const st = p.quests[b.quest];
       if (!st || st.s !== 'active') continue;
       if (Math.hypot(p.x - b.x, p.y - b.y) <= BOSS_TRIGGER_DIST) { trigger = p; break; }
     }
     if (!trigger) continue;
-    const m = spawnMonster(b.type, { x: b.x, y: b.y, r: b.r });
+    const m = spawnMonster(b.type, { x: b.x, y: b.y, r: b.r, z: bz });
     if (!m) { b.nextAt = now + 15000; continue; }
     b.monsterId = m.id;
     // Wächter mit erscheinen lassen
@@ -729,13 +778,13 @@ function updateBosses(now) {
     b.guardIds = [];
     if (def.guards) {
       for (let i = 0; i < def.guards.count; i++) {
-        const g = spawnMonster(def.guards.type, { x: b.x, y: b.y, r: b.r + 2 });
+        const g = spawnMonster(def.guards.type, { x: b.x, y: b.y, r: b.r + 2, z: bz });
         if (g) { g.guard = true; b.guardIds.push(g.id); }
       }
     }
     // Nur Spieler in der Höhle benachrichtigen
     for (const p of players.values()) {
-      if (Math.hypot(p.x - b.x, p.y - b.y) <= BOSS_TRIGGER_DIST + 8) {
+      if (p.z === bz && Math.hypot(p.x - b.x, p.y - b.y) <= BOSS_TRIGGER_DIST + 8) {
         info(p, `⚔️ ${def.name} erhebt sich ${b.zone} – gemeinsam mit ihren Wächtern! Zum Kampf!`);
       }
     }
@@ -769,7 +818,7 @@ function updateBosses(now) {
 // Aus der Schutzzone heraus darf NIEMAND angreifen – sonst könnte
 // man Monster gefahrlos von der Stadt aus beschießen.
 function blockedBySafeZone(p, quiet = false) {
-  if (!inTown(p.x, p.y)) return false;
+  if (!inTown(p.x, p.y, p.z)) return false;
   const now = Date.now();
   if (!quiet || now - (p.safeMsgAt || 0) > 2500) {
     p.safeMsgAt = now;
@@ -786,12 +835,12 @@ function tryMove(p, dx, dy) {
   if (now < p.nextMoveAt) return;
   const nx = p.x + dx, ny = p.y + dy;
   const diag = dx !== 0 && dy !== 0;
-  if (diag && (!isWalkable(world, p.x + dx, p.y) || !isWalkable(world, p.x, p.y + dy))) {
+  if (diag && (!isWalkable(world, p.x + dx, p.y, p.z) || !isWalkable(world, p.x, p.y + dy, p.z))) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
   }
   // Mit Totenkopf keine Stadt betreten
-  if (p.skullUntil > now && inTown(nx, ny) && !inTown(p.x, p.y)) {
+  if (p.skullUntil > now && inTown(nx, ny, p.z) && !inTown(p.x, p.y, p.z)) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     if (now - p.skullMsgAt > 2500) {
       p.skullMsgAt = now;
@@ -799,12 +848,16 @@ function tryMove(p, dx, dy) {
     }
     return;
   }
-  if (!isFree(nx, ny, p.id)) {
+  if (!isFree(nx, ny, p.z, p.id)) {
     events.push({ t: 'pos', id: p.id, x: p.x, y: p.y });
     return;
   }
   p.nextMoveAt = now + effectiveSpeed(p) * (diag ? 1.45 : 1) * 0.85;
   place(p, nx, ny);
+  // Treppe betreten? Dann Ebene wechseln (Tibia-Style)
+  const tile = tileAt(nx, ny, p.z);
+  if (tile === TILE.STAIR_DOWN) changeFloor(p, p.z - 1);
+  else if (tile === TILE.STAIR_UP) changeFloor(p, p.z + 1);
 }
 
 // Ziel darf Monster, Spieler oder gegnerisches Tier sein (PvP)
@@ -959,13 +1012,13 @@ function castSpell(p, spellId) {
       events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [m.x, m.y] });
       damageMonster(m, spellDamage(p, spell.base, spell.perLvl), p, 'fire');
     } else if (enemy && !enemy.dead) {
-      if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (inTown(p.x, p.y, p.z) || inTown(enemy.x, enemy.y, enemy.z)) return info(p, 'In der Stadt herrscht Frieden.');
       if (cheb(p, enemy) > spell.range) return info(p, 'Ziel ist zu weit weg.');
       events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [enemy.x, enemy.y] });
       applyDamageToPlayer(enemy, spellDamage(p, spell.base, spell.perLvl), p);
       markSkull(p);
     } else if (enemyPet && enemyPet.ownerId !== p.id) {
-      if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (inTown(p.x, p.y, p.z) || inTown(enemyPet.x, enemyPet.y, enemyPet.z)) return info(p, 'In der Stadt herrscht Frieden.');
       if (cheb(p, enemyPet) > spell.range) return info(p, 'Ziel ist zu weit weg.');
       events.push({ t: 'fx', kind: spell.fx, from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
       damagePet(enemyPet, spellDamage(p, spell.base, spell.perLvl), p);
@@ -984,13 +1037,13 @@ function castSpell(p, spellId) {
       events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [m.x, m.y] });
       damageMonster(m, dmg, p, 'melee');
     } else if (enemy && !enemy.dead) {
-      if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (inTown(p.x, p.y, p.z) || inTown(enemy.x, enemy.y, enemy.z)) return info(p, 'In der Stadt herrscht Frieden.');
       if (cheb(p, enemy) > 1) return info(p, 'Geh näher heran.');
       events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [enemy.x, enemy.y] });
       applyDamageToPlayer(enemy, dmg, p);
       markSkull(p);
     } else if (enemyPet && enemyPet.ownerId !== p.id) {
-      if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return info(p, 'In der Stadt herrscht Frieden.');
+      if (inTown(p.x, p.y, p.z) || inTown(enemyPet.x, enemyPet.y, enemyPet.z)) return info(p, 'In der Stadt herrscht Frieden.');
       if (cheb(p, enemyPet) > 1) return info(p, 'Geh näher heran.');
       events.push({ t: 'fx', kind: 'slash', from: [p.x, p.y], to: [enemyPet.x, enemyPet.y] });
       damagePet(enemyPet, dmg, p);
@@ -1250,7 +1303,7 @@ function getMonsterVictim(id) {
 function pickMonsterTarget(m, def) {
   let best = null, bestScore = Infinity;
   const consider = (v) => {
-    if (v.dead || inTown(v.x, v.y)) return;
+    if (v.dead || inTown(v.x, v.y, v.z)) return;
     const d = cheb(m, v);
     const attacked = m.damageBy[v.ownerId || v.id];
     const range = attacked ? def.aggro * 2 : def.aggro;
@@ -1292,8 +1345,8 @@ function findMonsterPath(m, target) {
       const ni = wi(nx, ny);
       if (visited[ni]) continue;
       visited[ni] = 1;
-      if (!monsterCanStep(nx, ny)) continue;
-      if (dx && dy && (!isWalkable(world, x + dx, y) || !isWalkable(world, x, y + dy))) continue;
+      if (!monsterCanStep(nx, ny, m.z)) continue;
+      if (dx && dy && (!isWalkable(world, x + dx, y, m.z) || !isWalkable(world, x, y + dy, m.z))) continue;
       parent[ni] = wi(x, y);
       qx.push(nx); qy.push(ny);
     }
@@ -1315,11 +1368,11 @@ function findMonsterPath(m, target) {
 function monsterStepToward(m, target, def, now) {
   const dx = Math.sign(target.x - m.x), dy = Math.sign(target.y - m.y);
   const cand = [];
-  if (dx && dy && isWalkable(world, m.x + dx, m.y) && isWalkable(world, m.x, m.y + dy)) cand.push([dx, dy]);
+  if (dx && dy && isWalkable(world, m.x + dx, m.y, m.z) && isWalkable(world, m.x, m.y + dy, m.z)) cand.push([dx, dy]);
   if (Math.abs(target.x - m.x) >= Math.abs(target.y - m.y)) cand.push([dx, 0], [0, dy]);
   else cand.push([0, dy], [dx, 0]);
   for (const [cx, cy] of cand) {
-    if (!(cx || cy) || !monsterCanStep(m.x + cx, m.y + cy)) continue;
+    if (!(cx || cy) || !monsterCanStep(m.x + cx, m.y + cy, m.z)) continue;
     // Nur gierig laufen, wenn es dem Ziel wirklich näher kommt
     const nd = Math.max(Math.abs(target.x - (m.x + cx)), Math.abs(target.y - (m.y + cy)));
     if (nd >= cheb(m, target)) continue;
@@ -1333,14 +1386,14 @@ function monsterStepToward(m, target, def, now) {
   if ((!m.path || !m.path.length) && now >= m.nextPathAt) {
     m.nextPathAt = now + 900;
     m.path = findMonsterPath(m, target);
-    m.pathGoal = { x: target.x, y: target.y };
+    m.pathGoal = { x: target.x, y: target.y, z: target.z };
   }
   if (m.path && m.path.length) {
     const [nx, ny] = m.path[0];
     const sx = nx - m.x, sy = ny - m.y;
     const validStep = Math.abs(sx) <= 1 && Math.abs(sy) <= 1 && (sx || sy)
-      && monsterCanStep(nx, ny)
-      && !(sx && sy && (!isWalkable(world, m.x + sx, m.y) || !isWalkable(world, m.x, m.y + sy)));
+      && monsterCanStep(nx, ny, m.z)
+      && !(sx && sy && (!isWalkable(world, m.x + sx, m.y, m.z) || !isWalkable(world, m.x, m.y + sy, m.z)));
     if (validStep) {
       m.path.shift();
       m.lastMove = now + (sx && sy ? def.moveMs * 0.45 : 0);
@@ -1356,7 +1409,7 @@ function monsterAI(m, now) {
   const def = MONSTERS[m.type];
 
   let target = m.targetId ? getMonsterVictim(m.targetId) : null;
-  if (target && (target.dead || cheb(m, target) > def.aggro * 2 + 4 || inTown(target.x, target.y))) {
+  if (target && (target.dead || cheb(m, target) > def.aggro * 2 + 4 || inTown(target.x, target.y, target.z))) {
     m.targetId = null; m.path = null; m.blockedSince = 0; target = null;
   }
   // Regelmäßig neu bewerten: Rache, Nähe, angeschlagene Ziele
@@ -1372,7 +1425,7 @@ function monsterAI(m, now) {
     if (now - m.lastMove > def.moveMs) {
       const dx = Math.sign(m.x - target.x), dy = Math.sign(m.y - target.y);
       for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy], [-dy, dx]]) {
-        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy)) {
+        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy, m.z)) {
           m.lastMove = now;
           place(m, m.x + cx, m.y + cy);
           break;
@@ -1399,7 +1452,7 @@ function monsterAI(m, now) {
     if (def.kite && d <= 2 && now - m.lastMove > def.moveMs) {
       const dx = Math.sign(m.x - target.x), dy = Math.sign(m.y - target.y);
       for (const [cx, cy] of [[dx, dy], [dx, 0], [0, dy], [-dy, dx]]) {
-        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy)) {
+        if ((cx || cy) && monsterCanStep(m.x + cx, m.y + cy, m.z)) {
           m.lastMove = now;
           place(m, m.x + cx, m.y + cy);
           return;
@@ -1450,8 +1503,8 @@ function monsterAI(m, now) {
   // Freies Streunen: Monster wandern durch ihr Revier
   if (now - m.lastMove > def.moveMs * 3 && Math.random() < 0.3) {
     const [dx, dy] = DIRS8[randInt(0, 7)];
-    if (monsterCanStep(m.x + dx, m.y + dy)
-        && !(dx && dy && (!isWalkable(world, m.x + dx, m.y) || !isWalkable(world, m.x, m.y + dy)))) {
+    if (monsterCanStep(m.x + dx, m.y + dy, m.z)
+        && !(dx && dy && (!isWalkable(world, m.x + dx, m.y, m.z) || !isWalkable(world, m.x, m.y + dy, m.z)))) {
       m.lastMove = now;
       place(m, m.x + dx, m.y + dy);
     }
@@ -1466,28 +1519,28 @@ function petAcquireTarget(pet, owner, now) {
   // Aktuelles Ziel behalten, solange gültig und in Reichweite
   if (pet.targetId) {
     const cur = monsters.get(pet.targetId) || players.get(pet.targetId) || pets.get(pet.targetId);
-    if (cur && !cur.dead && !inTown(cur.x, cur.y) && cheb(pet, cur) <= 11) return pet.targetId;
+    if (cur && !cur.dead && !inTown(cur.x, cur.y, cur.z) && cheb(pet, cur) <= 11) return pet.targetId;
     pet.targetId = null;
   }
   if (now < pet.retargetAt) return null;
   pet.retargetAt = now + 400;
-  if (owner.dead || inTown(pet.x, pet.y)) return null;
+  if (owner.dead || inTown(pet.x, pet.y, pet.z)) return null;
 
   // 1. Das aktive Ziel des Besitzers unterstützen (auch feindl. Spieler/Tier)
   if (owner.targetId) {
     const om = monsters.get(owner.targetId);
     const oe = players.get(owner.targetId);
     const op = pets.get(owner.targetId);
-    if (om && !om.dead && !inTown(om.x, om.y)) { pet.targetId = om.id; return om.id; }
-    if (oe && !oe.dead && oe.id !== owner.id && !inTown(oe.x, oe.y)) { pet.targetId = oe.id; return oe.id; }
-    if (op && op.ownerId !== owner.id && !inTown(op.x, op.y)) { pet.targetId = op.id; return op.id; }
+    if (om && !om.dead && !inTown(om.x, om.y, om.z)) { pet.targetId = om.id; return om.id; }
+    if (oe && !oe.dead && oe.id !== owner.id && !inTown(oe.x, oe.y, oe.z)) { pet.targetId = oe.id; return oe.id; }
+    if (op && op.ownerId !== owner.id && !inTown(op.x, op.y, op.z)) { pet.targetId = op.id; return op.id; }
   }
 
   // 2. Selbstständig: bevorzugt Monster, die Besitzer oder Tier angreifen,
   //    sonst ein aggressives Monster nahe beim Besitzer
   let best = null, bestScore = Infinity;
   for (const m of monsters.values()) {
-    if (m.dead || inTown(m.x, m.y)) continue;
+    if (m.dead || inTown(m.x, m.y, m.z)) continue;
     const dPet = cheb(pet, m);
     if (dPet > 12) continue;
     const threatens = m.targetId === owner.id || pet.ownerId === (m.targetId && pets.get(m.targetId) ? pets.get(m.targetId).ownerId : null);
@@ -1511,8 +1564,8 @@ function petAI(pet, now) {
     const enemy = players.get(targetId);
     const enemyPet = pets.get(targetId);
     if (m && !m.dead) { tgt = m; kind = 'monster'; }
-    else if (enemy && !enemy.dead && !inTown(enemy.x, enemy.y) && !inTown(pet.x, pet.y)) { tgt = enemy; kind = 'player'; }
-    else if (enemyPet && enemyPet.ownerId !== owner.id && !inTown(enemyPet.x, enemyPet.y) && !inTown(pet.x, pet.y)) { tgt = enemyPet; kind = 'pet'; }
+    else if (enemy && !enemy.dead && !inTown(enemy.x, enemy.y, enemy.z) && !inTown(pet.x, pet.y, pet.z)) { tgt = enemy; kind = 'player'; }
+    else if (enemyPet && enemyPet.ownerId !== owner.id && !inTown(enemyPet.x, enemyPet.y, enemyPet.z) && !inTown(pet.x, pet.y, pet.z)) { tgt = enemyPet; kind = 'pet'; }
   }
 
   if (tgt) {
@@ -1542,7 +1595,7 @@ function petAI(pet, now) {
       const cand = Math.abs(tgt.x - pet.x) >= Math.abs(tgt.y - pet.y)
         ? [[dx, dy], [dx, 0], [0, dy]] : [[dx, dy], [0, dy], [dx, 0]];
       for (const [cx, cy] of cand) {
-        if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy)) {
+        if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy, pet.z)) {
           pet.lastMove = now;
           placePet(pet, pet.x + cx, pet.y + cy);
           break;
@@ -1553,12 +1606,12 @@ function petAI(pet, now) {
   }
 
   const d = cheb(pet, owner);
-  if (d > 12) { placePet(pet, owner.x, owner.y); return; }
+  if (d > 12) { placePet(pet, owner.x, owner.y, owner.z); return; }
   if (d > 2 && now - pet.lastMove > 350) {
     const dx = Math.sign(owner.x - pet.x), dy = Math.sign(owner.y - pet.y);
     const cand = [[dx, dy], [dx, 0], [0, dy]];
     for (const [cx, cy] of cand) {
-      if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy)) {
+      if ((cx || cy) && isWalkable(world, pet.x + cx, pet.y + cy, pet.z)) {
         pet.lastMove = now;
         placePet(pet, pet.x + cx, pet.y + cy);
         break;
@@ -1586,7 +1639,7 @@ function playerAutoAttack(p, now) {
     trainSkill(p, 'atk', 1);
   } else if (enemy && !enemy.dead) {
     // PvP: nur außerhalb der Städte, Angreifer bekommt Totenkopf
-    if (inTown(p.x, p.y) || inTown(enemy.x, enemy.y)) return;
+    if (inTown(p.x, p.y, p.z) || inTown(enemy.x, enemy.y, enemy.z)) return;
     const d = cheb(p, enemy);
     if (d > voc.range) return;
     if (now - p.lastAtk < BASE_ATK_MS) return;
@@ -1597,7 +1650,7 @@ function playerAutoAttack(p, now) {
     markSkull(p);
   } else if (enemyPet && enemyPet.ownerId !== p.id) {
     // Gegnerisches Tier angreifen = ebenfalls PvP
-    if (inTown(p.x, p.y) || inTown(enemyPet.x, enemyPet.y)) return;
+    if (inTown(p.x, p.y, p.z) || inTown(enemyPet.x, enemyPet.y, enemyPet.z)) return;
     const d = cheb(p, enemyPet);
     if (d > voc.range) return;
     if (now - p.lastAtk < BASE_ATK_MS) return;
@@ -1622,14 +1675,14 @@ function tick() {
     if (m.dead) {
       if (now >= m.respawnAt) {
         const def = MONSTERS[m.type];
-        const pos = findFreeNear(m.home.x, m.home.y, m.home.r, m.home.rMin || 0, true);
+        const pos = findFreeNear(m.home.x, m.home.y, m.home.r, m.home.rMin || 0, true, m.home.z || 0);
         if (pos) {
           m.dead = false; m.hp = def.hp;
           m.shiny = !def.boss && Math.random() < SHINY_CHANCE; // beim Respawn neu würfeln
           m.damageBy = {};
           m.path = null; m.blockedSince = 0; m.lastCombatAt = 0; m.retargetAt = 0;
-          m.x = pos.x; m.y = pos.y;
-          occ.set(key(m.x, m.y), m.id);
+          m.x = pos.x; m.y = pos.y; m.z = m.home.z || 0;
+          occ.set(key(m.x, m.y, m.z), m.id);
           events.push({ t: 'spawn', monster: publicMonster(m) });
         }
       }

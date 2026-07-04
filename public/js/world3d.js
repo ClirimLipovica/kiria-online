@@ -8,8 +8,8 @@
 import * as THREE from 'three';
 import { makeAnimal } from './entities.js';
 
-export const TILE = { WATER: 0, SAND: 1, GRASS: 2, TREE: 3, ROCK: 4, ROAD: 5, WALL: 6, LAVA: 7, DIRT: 8, GRAVE: 9, FOUNTAIN: 10, FLOOR: 11 };
-export const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR]);
+export const TILE = { WATER: 0, SAND: 1, GRASS: 2, TREE: 3, ROCK: 4, ROAD: 5, WALL: 6, LAVA: 7, DIRT: 8, GRAVE: 9, FOUNTAIN: 10, FLOOR: 11, STAIR_DOWN: 12, STAIR_UP: 13, VOID: 14 };
+export const WALKABLE = new Set([TILE.SAND, TILE.GRASS, TILE.ROAD, TILE.DIRT, TILE.GRAVE, TILE.FLOOR, TILE.STAIR_DOWN, TILE.STAIR_UP]);
 export const H_STEP = 0.45;
 
 const CHUNK = 32;
@@ -21,7 +21,10 @@ const TILE_COLORS = {
   [TILE.TREE]: 0x4a8a3e,  [TILE.ROCK]: 0x8d8d92, [TILE.ROAD]: 0xaaa189,
   [TILE.WALL]: 0x8a7a66,  [TILE.LAVA]: 0x2a1a12, [TILE.DIRT]: 0x86663e,
   [TILE.GRAVE]: 0x6f5a40, [TILE.FOUNTAIN]: 0x9aa8b8, [TILE.FLOOR]: 0xa8814e,
+  [TILE.STAIR_DOWN]: 0x14100c, [TILE.STAIR_UP]: 0xcdbb92,
 };
+// Höhlen-Farbton: unter Tage wirken dieselben Kacheln dunkler/kälter
+const CAVE_TINT = 0.62;
 
 function mulberry32(a) {
   return function () {
@@ -36,8 +39,15 @@ export class World3D {
   constructor(scene, data) {
     this.scene = scene;
     this.size = data.size;
-    this.tiles = new Uint8Array(data.tiles);     // kommt binär vom Server
-    this.heights = new Uint8Array(data.heights);
+    // 6 Ebenen (z = -3..+2); data.floors = [{tiles, heights}, ...]
+    this.floors = data.floors;
+    this.z = 0;
+    this.tiles = this.floors[3].tiles;     // Zeiger auf die AKTUELLE Ebene
+    this.heights = this.floors[3].heights;
+    // Alles, was nur zur Oberwelt gehört (Wasser, Dächer, Stadt-Deko …),
+    // wandert in diese Gruppe und wird unter Tage einfach ausgeblendet.
+    this.surfaceGroup = new THREE.Group();
+    scene.add(this.surfaceGroup);
     this.buildings = data.buildings;
     this.towns = data.towns || [];
     this.fountainList = data.fountains || [];
@@ -96,6 +106,10 @@ export class World3D {
       map: this.lanternGlowTex, transparent: true, depthWrite: false,
       blending: THREE.AdditiveBlending, opacity: 0.25,
     });
+    // Treppenstufen (Ebenenwechsel)
+    this.stairGeo = new THREE.BoxGeometry(0.84, 0.1, 0.3);
+    this.stairDownMat = new THREE.MeshLambertMaterial({ color: 0x4a3a26 });
+    this.stairUpMat = new THREE.MeshLambertMaterial({ color: 0xd8c8a0 });
 
     this._buildWater();
     this._buildBuildings();
@@ -107,6 +121,32 @@ export class World3D {
   }
 
   idx(x, y) { return y * this.size + x; }
+
+  // Ebene wechseln: Chunks der alten Ebene entsorgen, Zeiger umschalten,
+  // Oberwelt-Deko ein-/ausblenden. Licht regelt update() je nach Ebene.
+  setFloor(z) {
+    if (z === this.z) return;
+    this.z = z;
+    const f = this.floors[z + 3];
+    this.tiles = f.tiles;
+    this.heights = f.heights;
+    for (const [key, chunk] of this.chunks) {
+      this.scene.remove(chunk.group);
+      chunk.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      this.chunks.delete(key);
+    }
+    this.surfaceGroup.visible = (z === 0);
+    this.water.visible = (z === 0);
+    // Himmel nur über der Erde
+    const sky = z >= 0;
+    if (this.skyDome) this.skyDome.visible = sky;
+    if (this.sunSprite) this.sunSprite.visible = sky;
+    if (this.moonSprite) this.moonSprite.visible = sky;
+    if (this.stars) this.stars.visible = sky;
+    // dichter, dunkler Höhlennebel unter Tage
+    if (this.scene.fog) this.scene.fog.density = z < 0 ? 0.035 : 0.013;
+  }
+
   tileAt(x, y) {
     if (x < 0 || y < 0 || x >= this.size || y >= this.size) return TILE.WATER;
     return this.tiles[this.idx(x, y)];
@@ -165,8 +205,10 @@ export class World3D {
     const pos = [], col = [], idxArr = [];
     const lavaPos = [], lavaIdx = [];
     const trees = [], rocks = [], graves = [], tufts = [], flowers = [], walls = [], lanterns = [];
+    const stairsDown = [], stairsUp = [];
     const c = new THREE.Color();
     let v = 0, lv = 0;
+    const underground = this.z < 0;
 
     const pushQuad = (p1, p2, p3, p4, color, shade) => {
       pos.push(...p1, ...p2, ...p3, ...p4);
@@ -179,19 +221,24 @@ export class World3D {
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
         const t = this.tiles[this.idx(x, y)];
+        if (t === TILE.VOID) continue; // Leere (Ränder der Obergeschosse)
         const h = this.heights[this.idx(x, y)] * H_STEP;
         const base = TILE_COLORS[t];
-        // dezentes Schachbrett + Zufallston = Tibia-Kachel-Look
-        const vary = (0.94 + rand() * 0.12) * ((x + y) % 2 ? 1.0 : 0.96);
+        // dezentes Schachbrett + Zufallston = Tibia-Kachel-Look;
+        // unter Tage wirken die Kacheln dunkler und kälter
+        let vary = (0.94 + rand() * 0.12) * ((x + y) % 2 ? 1.0 : 0.96);
+        if (underground && t !== TILE.LAVA && t !== TILE.STAIR_UP && t !== TILE.STAIR_DOWN) vary *= CAVE_TINT;
         pushQuad(
           [x - 0.5, h, y - 0.5], [x - 0.5, h, y + 0.5],
           [x + 0.5, h, y + 0.5], [x + 0.5, h, y - 0.5],
           base, vary,
         );
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nt = this.tileAt(x + dx, y + dy);
+          if (nt === TILE.VOID) continue;
           const nh = this.heightAt(x + dx, y + dy) * H_STEP;
           if (nh < h) {
-            const shade = 0.5 + rand() * 0.08;
+            const shade = (0.5 + rand() * 0.08) * (underground ? 0.72 : 1);
             const cliffCol = t === TILE.ROCK ? 0x6a6a70 : 0x6e5638;
             if (dx !== 0) {
               const sx = x + dx * 0.5;
@@ -209,15 +256,19 @@ export class World3D {
           lv += 4;
         } else if (t === TILE.TREE) trees.push([x, y]);
         else if (t === TILE.WALL) walls.push([x, y]);
-        else if (t === TILE.ROCK && rand() < 0.3) rocks.push([x, y]);
-        // Laternen im Raster entlang der Straßen (alle 7 Kacheln)
-        if (t === TILE.ROAD && x % 7 === 0 && y % 7 === 0) lanterns.push([x, y]);
+        else if (t === TILE.ROCK && rand() < (underground ? 0.12 : 0.3)) rocks.push([x, y]);
+        if (t === TILE.STAIR_DOWN) stairsDown.push([x, y]);
+        else if (t === TILE.STAIR_UP) stairsUp.push([x, y]);
+        // Laternen im Raster entlang der Straßen (nur Oberwelt)
+        if (this.z === 0 && t === TILE.ROAD && x % 7 === 0 && y % 7 === 0) lanterns.push([x, y]);
         else if (t === TILE.GRAVE) graves.push([x, y]);
         else if (t === TILE.GRASS) {
           const r = rand();
           if (r < 0.10) tufts.push([x, y]);
           else if (r < 0.125) flowers.push([x, y]);
         }
+        // Stalagmiten in den Höhlen (auf Erdboden, dezent)
+        if (underground && t === TILE.DIRT && rand() < 0.02) rocks.push([x, y]);
       }
     }
 
@@ -337,6 +388,25 @@ export class World3D {
       group.add(pole, glow);
     }
 
+    // Treppen: sichtbare Stufen (runter = dunkle Stufen in die Grube,
+    // rauf = helle, ansteigende Stufen)
+    for (const [x, y] of stairsDown) {
+      const gy = this.groundY(x, y);
+      for (let i = 0; i < 3; i++) {
+        const step = new THREE.Mesh(this.stairGeo, this.stairDownMat);
+        step.position.set(x, gy + 0.05 - i * 0.045, y - 0.28 + i * 0.28);
+        group.add(step);
+      }
+    }
+    for (const [x, y] of stairsUp) {
+      const gy = this.groundY(x, y);
+      for (let i = 0; i < 3; i++) {
+        const step = new THREE.Mesh(this.stairGeo, this.stairUpMat);
+        step.position.set(x, gy + 0.06 + i * 0.09, y - 0.28 + i * 0.28);
+        group.add(step);
+      }
+    }
+
     return { cx, cy, group };
   }
 
@@ -351,7 +421,7 @@ export class World3D {
     });
     this.water = new THREE.Mesh(geo, mat);
     this.water.position.set(0, 0.3, 0);
-    this.scene.add(this.water);
+    this.surfaceGroup.add(this.water);
   }
 
   // ================= GEBÄUDE-DÄCHER + DETAILS =================
@@ -385,7 +455,7 @@ export class World3D {
       roof.scale.set((b.w + 0.7) / (roofR * Math.SQRT2), 1, (b.h + 0.7) / (roofR * Math.SQRT2));
       roof.position.set(cx, gy + wallH + roofH / 2, cz);
       roof.castShadow = true;
-      this.scene.add(roof);
+      this.surfaceGroup.add(roof);
       this.roofs.push({ roof, b });
 
       // Fenster an Süd- und Nordwand (jede zweite Kachel, Tür ausgespart)
@@ -416,7 +486,7 @@ export class World3D {
         const flagGeo = new THREE.PlaneGeometry(1.0, 0.55, 8, 1);
         const flag = new THREE.Mesh(flagGeo, new THREE.MeshLambertMaterial({ color: 0xc8a030, side: THREE.DoubleSide }));
         flag.position.set(cx + 0.52, gy + wallH + roofH + 1.2, cz);
-        this.scene.add(pole, flag);
+        this.surfaceGroup.add(pole, flag);
         if (!this.flagsList) this.flagsList = [];
         this.flagsList.push({ flag, base: Float32Array.from(flagGeo.attributes.position.array) });
       }
@@ -437,7 +507,7 @@ export class World3D {
         m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1));
         winMesh.setMatrixAt(i, m4);
       });
-      this.scene.add(winMesh);
+      this.surfaceGroup.add(winMesh);
     }
     if (doorT.length) {
       const doorMesh = new THREE.InstancedMesh(
@@ -450,7 +520,7 @@ export class World3D {
         m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1));
         doorMesh.setMatrixAt(i, m4);
       });
-      this.scene.add(doorMesh);
+      this.surfaceGroup.add(doorMesh);
     }
     if (chimneyT.length) {
       const chimMesh = new THREE.InstancedMesh(
@@ -463,7 +533,7 @@ export class World3D {
         chimMesh.setMatrixAt(i, m4);
       });
       chimMesh.castShadow = true;
-      this.scene.add(chimMesh);
+      this.surfaceGroup.add(chimMesh);
     }
   }
 
@@ -502,11 +572,11 @@ export class World3D {
         const pole = new THREE.Mesh(poleGeo, poleMat);
         pole.position.set(x, gy + 0.7, y);
         pole.castShadow = true;
-        this.scene.add(pole);
+        this.surfaceGroup.add(pole);
         const fl = mkFlame();
         fl.position.set(x, gy + 1.55, y);
         fl.scale.set(0.5, 0.6, 1);
-        this.scene.add(fl);
+        this.surfaceGroup.add(fl);
         this.flames.push({ sp: fl, seed: Math.random() * 10 });
       }
     }
@@ -530,7 +600,7 @@ export class World3D {
         new THREE.MeshLambertMaterial({ color: 0x8a98a8 }),
       );
       column.position.set(f.x, gy + 0.5 - H_STEP, f.y);
-      this.scene.add(basin, waterDisc, column);
+      this.surfaceGroup.add(basin, waterDisc, column);
       // Wasserstrahl-Partikel
       const N = 40;
       const posArr = new Float32Array(N * 3);
@@ -539,7 +609,7 @@ export class World3D {
       const pts = new THREE.Points(geo, new THREE.PointsMaterial({
         color: 0xbfe8ff, size: 0.06, transparent: true, opacity: 0.9, depthWrite: false,
       }));
-      this.scene.add(pts);
+      this.surfaceGroup.add(pts);
       this.fountainJets.push({ pts, x: f.x, y: f.y, gy: gy - H_STEP, phases: Array.from({ length: N }, () => Math.random()) });
     }
 
@@ -558,7 +628,7 @@ export class World3D {
         const post = new THREE.Mesh(postGeo, postMat);
         post.position.set(sx + ox, gy + 0.65, sy + oz);
         post.castShadow = true;
-        this.scene.add(post);
+        this.surfaceGroup.add(post);
       }
       const canopy = new THREE.Mesh(
         new THREE.ConeGeometry(1.5, 0.55, 4),
@@ -576,7 +646,7 @@ export class World3D {
       const crate = new THREE.Mesh(crateGeo, crateMat);
       crate.position.set(sx + 1.4, gy + 0.23, sy + 0.9);
       crate.castShadow = true;
-      this.scene.add(canopy, counter, barrel, crate);
+      this.surfaceGroup.add(canopy, counter, barrel, crate);
     });
 
     // Blumenbeete rund um jeden Brunnen
@@ -600,7 +670,7 @@ export class World3D {
           i++;
         }
       }
-      this.scene.add(beds);
+      this.surfaceGroup.add(beds);
     }
   }
 
@@ -622,7 +692,7 @@ export class World3D {
       sp.scale.set(7, 1.3, 1);
       sp.position.set(t.cx, 6.5, t.cy);
       sp.renderOrder = 800;
-      this.scene.add(sp);
+      this.surfaceGroup.add(sp);
     }
   }
 
@@ -705,7 +775,7 @@ export class World3D {
       const lp = new THREE.Group(); lp.add(l);
       const rp = new THREE.Group(); rp.add(r);
       g.add(lp, rp);
-      this.scene.add(g);
+      this.surfaceGroup.add(g);
       this.butterflies.push({ g, lp, rp, angle: rand() * Math.PI * 2, speed: 0.6 + rand() * 0.8, phase: rand() * 10 });
     }
 
@@ -720,7 +790,7 @@ export class World3D {
       w2.position.x = 0.24; w2.rotation.z = -0.4;
       g.add(w1, w2);
       g.rotation.x = -Math.PI / 2;
-      this.scene.add(g);
+      this.surfaceGroup.add(g);
       this.birds.push({ g, cx: 0, cy: 0, r: 6 + rand() * 10, angle: rand() * Math.PI * 2, h: 13 + rand() * 5, speed: 0.25 + rand() * 0.3, w1, w2 });
     }
 
@@ -742,7 +812,7 @@ export class World3D {
       const s = 10 + rand() * 14;
       sp.scale.set(s, s * 0.45, 1);
       sp.position.set(rand() * 100 - 50, 26 + rand() * 8, rand() * 100 - 50);
-      this.scene.add(sp);
+      this.surfaceGroup.add(sp);
       this.clouds.push({ sp, speed: 0.3 + rand() * 0.5 });
     }
 
@@ -754,7 +824,7 @@ export class World3D {
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
     this.fireflyMat = new THREE.PointsMaterial({ color: 0xd8f860, size: 0.1, transparent: true, opacity: 0, depthWrite: false });
     this.fireflies = new THREE.Points(geo, this.fireflyMat);
-    this.scene.add(this.fireflies);
+    this.surfaceGroup.add(this.fireflies);
 
     // Fallende Blätter
     this.leaves = [];
@@ -764,7 +834,7 @@ export class World3D {
       });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.12), mat);
       m.visible = false;
-      this.scene.add(m);
+      this.surfaceGroup.add(m);
       this.leaves.push({ m, y: 0, phase: rand() * 10, active: false });
     }
 
@@ -806,7 +876,7 @@ export class World3D {
       const deer = i >= 6;
       const g = deer ? mkDeer() : mkRabbit();
       g.visible = false;
-      this.scene.add(g);
+      this.surfaceGroup.add(g);
       this.critters.push({ g, deer, x: 0, y: 0, tx: 0, ty: 0, timer: 0, hop: rand() * 10, placed: false });
     }
 
@@ -817,7 +887,7 @@ export class World3D {
       const x = bounds.x + 1 + rand() * (bounds.w - 2);
       const y = bounds.y + 1 + rand() * (bounds.h - 2);
       g.position.set(x, this.groundY(Math.round(x), Math.round(y)), y);
-      this.scene.add(g);
+      this.surfaceGroup.add(g);
       this.farmAnimals.push({ g, type, bounds, x, y, tx: x, ty: y, timer: rand() * 4, hop: rand() * 10 });
     };
     if (this.farm) {
@@ -833,7 +903,7 @@ export class World3D {
     }
 
     this.torch = new THREE.PointLight(0xffaa55, 0, 9, 1.6);
-    this.scene.add(this.torch);
+    this.surfaceGroup.add(this.torch);
   }
 
   _buildLights() {
@@ -868,40 +938,55 @@ export class World3D {
     // Chunks nachladen: jeden Frame höchstens 1 neuer Chunk (kein Ruckeln)
     this.ensureChunks(Math.round(center.x), Math.round(center.z));
 
-    // Wasser folgt dem Spieler + Wellen
-    this.water.position.x = center.x;
-    this.water.position.z = center.z;
-    const p = this.waterGeo.attributes.position;
-    const base = this.waterBase;
-    const wt = t * 1.4;
-    for (let i = 0; i < p.count; i++) {
-      const x = base[i * 3] + center.x, z = base[i * 3 + 2] + center.z;
-      p.array[i * 3 + 1] = Math.sin(x * 0.5 + wt) * 0.045 + Math.cos(z * 0.4 + wt * 0.8) * 0.045;
+    // Wasser folgt dem Spieler + Wellen (nur Oberwelt)
+    if (this.water.visible) {
+      this.water.position.x = center.x;
+      this.water.position.z = center.z;
+      const p = this.waterGeo.attributes.position;
+      const base = this.waterBase;
+      const wt = t * 1.4;
+      for (let i = 0; i < p.count; i++) {
+        const x = base[i * 3] + center.x, z = base[i * 3 + 2] + center.z;
+        p.array[i * 3 + 1] = Math.sin(x * 0.5 + wt) * 0.045 + Math.cos(z * 0.4 + wt * 0.8) * 0.045;
+      }
+      p.needsUpdate = true;
     }
-    p.needsUpdate = true;
 
     this.lavaMat.opacity = 0.7 + Math.sin(t * 3) * 0.2;
 
     // Tag/Nacht (8 Minuten)
     const cyc = (t % 480) / 480;
     const sunAngle = cyc * Math.PI * 2 - Math.PI / 2;
-    const dayness = Math.max(0, Math.sin(cyc * Math.PI * 2));
+    let dayness = Math.max(0, Math.sin(cyc * Math.PI * 2));
     const dawn = Math.max(0, 1 - Math.abs(dayness - 0.15) * 6) * (dayness > 0.01 ? 1 : 0);
-    const night = Math.max(0, 1 - dayness * 2.5);
+    let night = Math.max(0, 1 - dayness * 2.5);
+    const underground = this.z < 0;
 
-    // Nacht deutlich heller (Mondlicht + blaues Ambiente), damit man gut sieht
-    this.sun.intensity = 0.5 + dayness * 1.45;
-    this.hemi.intensity = 0.72 + dayness * 0.6;
-    const sky = this._skyNight.clone().lerp(this._skyDay, dayness);
-    if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.45);
-    const horizon = this._horNight.clone().lerp(this._horDay, dayness);
-    if (dawn > 0) horizon.lerp(this._horDawn, dawn * 0.7);
-    this.scene.background.copy(sky);
-    this.scene.fog.color.copy(horizon);
-    this.skyUniforms.topColor.value.copy(sky);
-    this.skyUniforms.horizonColor.value.copy(horizon);
+    if (underground) {
+      // Unter Tage: kein Tageslicht – konstantes, warmes Höhlendämmerlicht.
+      // Fackel & Utevo Lux werden hier zum besten Freund!
+      this.sun.intensity = 0.1;
+      this.hemi.intensity = 0.5;
+      this.hemi.color.setHex(0xb8a488);   // warmes Fels-Licht statt Himmelsblau
+      this.scene.background.setHex(0x0a0806);
+      this.scene.fog.color.setHex(0x0d0b08);
+      night = 1; dayness = 0;
+    } else {
+      this.hemi.color.setHex(0xd8e8ff);
+      // Nacht deutlich heller (Mondlicht + blaues Ambiente), damit man gut sieht
+      this.sun.intensity = 0.5 + dayness * 1.45;
+      this.hemi.intensity = 0.72 + dayness * 0.6;
+      const sky = this._skyNight.clone().lerp(this._skyDay, dayness);
+      if (dawn > 0) sky.lerp(this._skyDawn, dawn * 0.45);
+      const horizon = this._horNight.clone().lerp(this._horDay, dayness);
+      if (dawn > 0) horizon.lerp(this._horDawn, dawn * 0.7);
+      this.scene.background.copy(sky);
+      this.scene.fog.color.copy(horizon);
+      this.skyUniforms.topColor.value.copy(sky);
+      this.skyUniforms.horizonColor.value.copy(horizon);
+    }
     this.skyDome.position.set(center.x, 0, center.z);
-    this.starMat.opacity = night * 0.9;
+    this.starMat.opacity = underground ? 0 : night * 0.9;
 
     const sunX = Math.cos(sunAngle), sunY = Math.sin(sunAngle);
     this.sun.position.set(center.x + sunX * 30, 18 + sunY * 14, center.z + 14);
@@ -968,9 +1053,11 @@ export class World3D {
     // Straßenlaternen leuchten nachts (geteiltes Material)
     this.lanternGlowMat.opacity = 0.12 + night * 0.85;
 
-    // Fackel = hell, Utevo Lux = sehr hell und weit
+    // Fackel = hell, Utevo Lux = sehr hell und weit.
+    // Unter Tage leuchtet die Fackel IMMER (dort ist es ewig dunkel).
     const lb = this.playerLightBoost || 0;
-    this.torch.intensity = night * (lb === 2 ? 5 : lb === 1 ? 3 : 1.2);
+    const lightNeed = underground ? 1.25 : night;
+    this.torch.intensity = lightNeed * (lb === 2 ? 5 : lb === 1 ? 3 : 1.2);
     this.torch.distance = lb === 2 ? 24 : lb === 1 ? 14 : 8;
     this.torch.position.set(center.x, center.y + 1.7, center.z);
 
