@@ -23,8 +23,8 @@ const TILE_COLORS = {
   [TILE.GRAVE]: 0x6f5a40, [TILE.FOUNTAIN]: 0x9aa8b8, [TILE.FLOOR]: 0xa8814e,
   [TILE.STAIR_DOWN]: 0x14100c, [TILE.STAIR_UP]: 0xcdbb92,
 };
-// Höhlen-Farbton: unter Tage wirken dieselben Kacheln dunkler/kälter
-const CAVE_TINT = 0.62;
+// Höhlen-Farbton: unter Tage wirken dieselben Kacheln nur leicht gedämpft
+const CAVE_TINT = 0.9;
 
 function mulberry32(a) {
   return function () {
@@ -110,6 +110,23 @@ export class World3D {
     this.stairGeo = new THREE.BoxGeometry(0.84, 0.1, 0.3);
     this.stairDownMat = new THREE.MeshLambertMaterial({ color: 0x4a3a26 });
     this.stairUpMat = new THREE.MeshLambertMaterial({ color: 0xd8c8a0 });
+    // Wandfackeln in den Höhlen (Stab + geteiltes Glüh-Sprite, immer an)
+    this.caveTorchGeo = new THREE.CylinderGeometry(0.035, 0.05, 0.55, 5);
+    this.caveTorchMat = new THREE.MeshLambertMaterial({ color: 0x4a3018 });
+    this.caveFlameMat = new THREE.SpriteMaterial({
+      map: this.lanternGlowTex, transparent: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: 1,
+    });
+    // 3 echte Lichter, die zu den nächstgelegenen Fackeln wandern –
+    // so werfen die Fackeln um den Spieler herum echtes, warmes Licht
+    this.torchLights = [];
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xffc078, 0, 9, 1.8);
+      l.visible = false;
+      scene.add(l);
+      this.torchLights.push(l);
+    }
+    this._torchLightAt = 0;
 
     this._buildWater();
     this._buildBuildings();
@@ -143,8 +160,8 @@ export class World3D {
     if (this.sunSprite) this.sunSprite.visible = sky;
     if (this.moonSprite) this.moonSprite.visible = sky;
     if (this.stars) this.stars.visible = sky;
-    // dichter, dunkler Höhlennebel unter Tage
-    if (this.scene.fog) this.scene.fog.density = z < 0 ? 0.035 : 0.013;
+    // etwas dichterer, warmer Höhlennebel unter Tage
+    if (this.scene.fog) this.scene.fog.density = z < 0 ? 0.015 : 0.013;
   }
 
   tileAt(x, y) {
@@ -205,7 +222,7 @@ export class World3D {
     const pos = [], col = [], idxArr = [];
     const lavaPos = [], lavaIdx = [];
     const trees = [], rocks = [], graves = [], tufts = [], flowers = [], walls = [], lanterns = [];
-    const stairsDown = [], stairsUp = [];
+    const stairsDown = [], stairsUp = [], caveTorches = [];
     const c = new THREE.Color();
     let v = 0, lv = 0;
     const underground = this.z < 0;
@@ -257,6 +274,13 @@ export class World3D {
         } else if (t === TILE.TREE) trees.push([x, y]);
         else if (t === TILE.WALL) walls.push([x, y]);
         else if (t === TILE.ROCK && rand() < (underground ? 0.12 : 0.3)) rocks.push([x, y]);
+        // Wandfackeln: an Fels-Wänden neben begehbarem Höhlenboden (dichtes Raster)
+        if (underground && t === TILE.ROCK && (x * 5 + y * 3) % 4 === 0) {
+          for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1]]) {
+            const nt = this.tileAt(x + dx, y + dy);
+            if (nt === TILE.DIRT || nt === TILE.FLOOR || nt === TILE.LAVA) { caveTorches.push([x, y, dx, dy]); break; }
+          }
+        }
         if (t === TILE.STAIR_DOWN) stairsDown.push([x, y]);
         else if (t === TILE.STAIR_UP) stairsUp.push([x, y]);
         // Laternen im Raster entlang der Straßen (nur Oberwelt)
@@ -407,7 +431,24 @@ export class World3D {
       }
     }
 
-    return { cx, cy, group };
+    // Wandfackeln in den Höhlen: schräger Stab an der Felswand + warmes
+    // Glüh-Sprite (geteiltes Material, leuchtet dauerhaft)
+    const torchSpots = [];
+    for (const [x, y, dx, dy] of caveTorches) {
+      const floorY = this.heightAt(x + dx, y + dy) * H_STEP;
+      const px = x + dx * 0.58, pz = y + dy * 0.58;
+      const stick = new THREE.Mesh(this.caveTorchGeo, this.caveTorchMat);
+      stick.position.set(px, floorY + 1.0, pz);
+      stick.rotation.z = dx * 0.45;
+      stick.rotation.x = -dy * 0.45;
+      const flame = new THREE.Sprite(this.caveFlameMat);
+      flame.position.set(px + dx * 0.12, floorY + 1.38, pz + dy * 0.12);
+      flame.scale.set(2.2, 2.2, 1);
+      group.add(stick, flame);
+      torchSpots.push([px, floorY + 1.3, pz]);
+    }
+
+    return { cx, cy, group, torchSpots };
   }
 
   // ================= WASSER (folgt dem Spieler) =================
@@ -963,13 +1004,13 @@ export class World3D {
     const underground = this.z < 0;
 
     if (underground) {
-      // Unter Tage: kein Tageslicht – konstantes, warmes Höhlendämmerlicht.
-      // Fackel & Utevo Lux werden hier zum besten Freund!
-      this.sun.intensity = 0.1;
-      this.hemi.intensity = 0.5;
-      this.hemi.color.setHex(0xb8a488);   // warmes Fels-Licht statt Himmelsblau
-      this.scene.background.setHex(0x0a0806);
-      this.scene.fog.color.setHex(0x0d0b08);
+      // Unter Tage: konstantes, warmes Fackel-Dämmerlicht – deutlich hell
+      // genug zum Spielen, die Stimmung machen Fackeln und Nebel.
+      this.sun.intensity = 0.7;
+      this.hemi.intensity = 1.5;
+      this.hemi.color.setHex(0xe0c4a0);   // warmes Fackel-Licht statt Himmelsblau
+      this.scene.background.setHex(0x241d16);
+      this.scene.fog.color.setHex(0x2a2318);
       night = 1; dayness = 0;
     } else {
       this.hemi.color.setHex(0xd8e8ff);
@@ -1060,6 +1101,38 @@ export class World3D {
     this.torch.intensity = lightNeed * (lb === 2 ? 5 : lb === 1 ? 3 : 1.2);
     this.torch.distance = lb === 2 ? 24 : lb === 1 ? 14 : 8;
     this.torch.position.set(center.x, center.y + 1.7, center.z);
+
+    // Wandernde Fackel-Lichter: die 3 nächsten Wandfackeln leuchten echt
+    // (alle ~0,3 s neu bestimmt, flackern leicht)
+    if (underground) {
+      this._torchLightAt -= dt;
+      if (this._torchLightAt <= 0) {
+        this._torchLightAt = 0.3;
+        const spots = [];
+        for (const [, chunk] of this.chunks) {
+          if (!chunk.group.visible || !chunk.torchSpots) continue;
+          for (const s of chunk.torchSpots) {
+            const d = (s[0] - center.x) * (s[0] - center.x) + (s[2] - center.z) * (s[2] - center.z);
+            if (d < 500) spots.push([d, s]);
+          }
+        }
+        spots.sort((a, b) => a[0] - b[0]);
+        for (let i = 0; i < this.torchLights.length; i++) {
+          const l = this.torchLights[i];
+          if (spots[i]) {
+            const [, s] = spots[i];
+            l.position.set(s[0], s[1], s[2]);
+            l.visible = true;
+          } else l.visible = false;
+        }
+      }
+      for (let i = 0; i < this.torchLights.length; i++) {
+        const l = this.torchLights[i];
+        if (l.visible) l.intensity = 2.1 + Math.sin(t * 9 + i * 2.1) * 0.4;
+      }
+    } else {
+      for (const l of this.torchLights) l.visible = false;
+    }
 
     // Hoftiere, Katzen und Hunde
     for (const fa of this.farmAnimals) {

@@ -181,7 +181,7 @@ socket.on('welcome', (data) => {
   initInput();
   requestAnimationFrame(loop);
 
-  window.KIRIA = { entities, npcData, camera, world, self: () => entities.get(selfId) };
+  window.KIRIA = { entities, npcData, camera, world, renderer, composer, self: () => entities.get(selfId) };
 });
 
 function initThree() {
@@ -609,8 +609,10 @@ function findPath(sx, sy, tx, ty, allowDest = false) {
   if (!allowDest && !world.isWalkable(tx, ty)) return null;
 
   const blocked = new Set();
+  const myZ = (you && you.z) || 0;
   for (const e of entities.values()) {
     if (e.id === selfId || e.dead || e.kind === 'npc' || e.kind === 'pet' || e.kind === 'corpse') continue;
+    if ((e.z || 0) !== myZ) continue; // andere Ebenen blockieren den Weg nicht!
     blocked.add(e.tx + ',' + e.ty);
   }
 

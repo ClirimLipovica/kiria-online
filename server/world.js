@@ -658,6 +658,40 @@ function generateWorld(seed = 20260702) {
   linkDown(2, 758, 78); linkDown(2, 764, 70);
   cs(2, 'phoenix', 4, 760, 74, 6); cs(2, 'storm_eagle', 5, 757, 72, 6); cs(2, 'frost_dragon', 2, 763, 76, 6);
 
+  // ---- Sichtbare Trampelpfade zu ALLEN Oberwelt-Eingängen ----
+  // Jede Treppe an der Oberfläche wird mit einem 2 Kacheln breiten
+  // Erdpfad an die nächste Straße angebunden – so findet man jeden
+  // Eingang und kommt garantiert hin (kein Irren durch Felsspalten).
+  {
+    const isRoadAt = (x, y) => inB(x, y) && tiles[idx(x, y)] === TILE.ROAD;
+    const surfaceStairs = stairs.filter((s) => s.zTop === 0 || s.zBottom === 0);
+    for (const st of surfaceStairs) {
+      // nächste Straßen-Kachel suchen (Spiralsuche bis Radius 90)
+      let target = null;
+      outer:
+      for (let r = 4; r <= 90 && !target; r += 2) {
+        for (let a = 0; a < 360; a += 10) {
+          const x = Math.round(st.x + Math.cos(a * Math.PI / 180) * r);
+          const y = Math.round(st.y + Math.sin(a * Math.PI / 180) * r);
+          if (isRoadAt(x, y)) { target = { x, y }; break outer; }
+        }
+      }
+      if (!target) continue;
+      // L-förmiger Erdpfad (2 breit), Wasser wird NICHT überbrückt,
+      // Gebäudewände bleiben stehen – nur Fels/Bäume weichen
+      const dig = (x, y) => {
+        for (const [ox, oy] of [[0, 0], [1, 0], [0, 1]]) {
+          const tx = x + ox, ty = y + oy;
+          if (!inB(tx, ty)) continue;
+          const t = tiles[idx(tx, ty)];
+          if (t === TILE.ROCK || t === TILE.TREE) { tiles[idx(tx, ty)] = TILE.DIRT; heights[idx(tx, ty)] = 1; }
+        }
+      };
+      for (let x = Math.min(st.x, target.x); x <= Math.max(st.x, target.x); x++) dig(x, st.y);
+      for (let y = Math.min(st.y, target.y); y <= Math.max(st.y, target.y); y++) dig(target.x, y);
+    }
+  }
+
   // ---- Erreichbarkeits-Maske über ALLE Ebenen (BFS mit Treppen) ----
   const reachable = [];
   for (let f = 0; f < 6; f++) reachable.push(new Uint8Array(SIZE * SIZE));
