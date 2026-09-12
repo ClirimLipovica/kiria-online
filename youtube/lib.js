@@ -63,7 +63,7 @@ export async function gemListModels() {
 }
 
 export async function gemImage(prompt, { model, aspectRatio = '16:9', outFile, refImages = [] } = {}) {
-  model = model || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+  model = model || process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
   const parts = [{ text: prompt }];
   for (const f of refImages) {
     const ext = path.extname(f).slice(1).toLowerCase();
