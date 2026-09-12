@@ -9,3 +9,7 @@ server/data/
 
 # Sonstiges
 _sync_test.txt
+
+# YouTube-Pipeline (API-Keys + erzeugte Dateien)
+youtube/.env
+youtube/out/
